@@ -4,7 +4,20 @@ function extractExpenseData(text: string): { date: string; amount: string; categ
   const amountMatch = text.match(/(\d[\d\s,]*(?:\.\d+)?)\s*([кkтtмm]{1,2})?[\s]*(?:р(?:уб)?\.?|₽)?/i);
   if (!amountMatch || !amountMatch[1]) return null;
 
-  const today = new Date().toLocaleDateString("ru-RU");
+  // Ищем дату в формате ДД.ММ или ДД.ММ.ГГГГ
+  const dateMatch = text.match(/(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?/);
+  let date: string;
+  if (dateMatch) {
+    const day = dateMatch[1].padStart(2, "0");
+    const month = dateMatch[2].padStart(2, "0");
+    const year = dateMatch[3]
+      ? (dateMatch[3].length === 2 ? `20${dateMatch[3]}` : dateMatch[3])
+      : new Date().getFullYear();
+    date = `${day}.${month}.${year}`;
+  } else {
+    date = new Date().toLocaleDateString("ru-RU");
+  }
+
   let amount = parseFloat(amountMatch[1].replace(/[\s,]/g, ""));
   const suffix = amountMatch[2]?.toLowerCase() ?? "";
 
@@ -24,7 +37,7 @@ function extractExpenseData(text: string): { date: string; amount: string; categ
   const category = categories.find(c => text.toLowerCase().includes(c)) ?? "прочее";
 
   return {
-    date: today,
+    date,
     amount: String(Math.round(amount)),
     category,
     description: text,
