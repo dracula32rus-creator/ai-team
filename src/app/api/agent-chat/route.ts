@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
 function extractExpenseData(text: string): { date: string; amount: string; category: string; description: string } | null {
-  // Ищем число с возможными пробелами и запятыми перед "р" или "руб"
   const amountMatch = text.match(/(\d[\d\s,]*)\s*(?:р(?:уб)?\.?|₽)/i);
   if (!amountMatch) return null;
 
@@ -41,19 +40,22 @@ export async function POST(req: NextRequest) {
   const data = await res.json();
   const text = data.choices?.[0]?.message?.content ?? "";
 
-  // Если это Таня и пользователь упоминает расход — записываем в таблицу
   if (agentId === "accountant-tanya") {
     const lastUserMessage = messages[messages.length - 1]?.content ?? "";
+    console.log("Last message:", lastUserMessage);
     const expense = extractExpenseData(lastUserMessage);
+    console.log("Extracted expense:", JSON.stringify(expense));
 
     if (expense) {
       try {
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://ai-team-42mz.vercel.app";
-        await fetch(`${baseUrl}/api/sheets`, {
+        const baseUrl = "https://ai-team-42mz.vercel.app";
+        const sheetsRes = await fetch(`${baseUrl}/api/sheets`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(expense),
         });
+        const sheetsData = await sheetsRes.json();
+        console.log("Sheets response:", JSON.stringify(sheetsData));
       } catch (e) {
         console.error("Failed to save expense:", e);
       }
