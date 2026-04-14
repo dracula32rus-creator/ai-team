@@ -9,11 +9,16 @@ import { Aurora } from "@/components/Aurora";
 import { ChatMessage } from "@/components/ChatMessage";
 import { TypingIndicator } from "@/components/TypingIndicator";
 
+interface Message {
+  role: string;
+  content: string;
+}
+
 export default function AgentChat() {
   const { id } = useParams();
   const agent = getAgent(id as string);
 
-  const [messages, setMessages] = useState<Array<{ role: string; content: string }>>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -22,6 +27,23 @@ export default function AgentChat() {
     agentId: agent?.id ?? "",
     onTranscript: (transcript) => setInput(transcript),
   });
+
+  // Загружаем историю из localStorage
+  useEffect(() => {
+    if (!agent) return;
+    const saved = localStorage.getItem(`chat-${agent.id}`);
+    if (saved) {
+      setMessages(JSON.parse(saved));
+    } else {
+      setMessages([{ role: "assistant", content: agent.greeting }]);
+    }
+  }, [agent?.id]);
+
+  // Сохраняем историю в localStorage
+  useEffect(() => {
+    if (!agent || messages.length === 0) return;
+    localStorage.setItem(`chat-${agent.id}`, JSON.stringify(messages));
+  }, [messages, agent?.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -47,17 +69,19 @@ export default function AgentChat() {
     setLoading(false);
   }
 
+  function clearHistory() {
+    localStorage.removeItem(`chat-${agent!.id}`);
+    setMessages([{ role: "assistant", content: agent!.greeting }]);
+  }
+
   return (
     <div className="flex flex-col h-screen bg-[#0a0a0a] relative overflow-hidden">
-
-      {/* Aurora фон */}
       <Aurora
         colorStops={[agent.color, agent.color, "#0a0a0a"]}
         blend={0.15}
         speed={0.3}
       />
 
-      {/* Контент поверх Aurora */}
       <div className="relative z-10 flex flex-col h-full">
 
         {/* Шапка */}
@@ -66,21 +90,32 @@ export default function AgentChat() {
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-3 px-6 py-4 border-b border-white/10 bg-black/20 backdrop-blur-xl"
         >
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium"
-            style={{
-              backgroundColor: agent.color + "33",
-              color: agent.color,
-              boxShadow: `0 0 20px ${agent.color}40`,
-            }}
-          >
-            {agent.name[0]}
-          </div>
+          {agent.avatar ? (
+            <img
+              src={agent.avatar}
+              alt={agent.name}
+              className="w-10 h-10 rounded-full object-cover"
+              style={{ boxShadow: `0 0 20px ${agent.color}40` }}
+            />
+          ) : (
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium"
+              style={{ backgroundColor: agent.color + "33", color: agent.color }}
+            >
+              {agent.name[0]}
+            </div>
+          )}
           <div className="flex-1">
             <p className="text-white font-medium text-sm">{agent.name}</p>
             <p className="text-white/40 text-xs">{agent.role}</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={clearHistory}
+              className="text-xs px-2 py-1 rounded-full border border-white/10 text-white/30 hover:text-white/50 transition-all"
+            >
+              очистить
+            </button>
             <button
               onClick={voice.toggleMute}
               className={`text-xs px-2 py-1 rounded-full border transition-all ${
@@ -117,6 +152,7 @@ export default function AgentChat() {
                 content={msg.content}
                 agentName={agent.name}
                 agentColor={agent.color}
+                agentAvatar={msg.role === "assistant" ? agent.avatar : undefined}
                 index={i}
               />
             ))}
