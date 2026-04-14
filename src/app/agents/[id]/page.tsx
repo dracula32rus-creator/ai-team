@@ -28,7 +28,6 @@ export default function AgentChat() {
     onTranscript: (transcript) => setInput(transcript),
   });
 
-  // Загружаем историю из localStorage
   useEffect(() => {
     if (!agent) return;
     const saved = localStorage.getItem(`chat-${agent.id}`);
@@ -39,7 +38,6 @@ export default function AgentChat() {
     }
   }, [agent?.id]);
 
-  // Сохраняем историю в localStorage
   useEffect(() => {
     if (!agent || messages.length === 0) return;
     localStorage.setItem(`chat-${agent.id}`, JSON.stringify(messages));
@@ -61,7 +59,11 @@ export default function AgentChat() {
     const res = await fetch("/api/agent-chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: newMessages, systemPrompt: agent!.systemPrompt }),
+      body: JSON.stringify({
+        messages: newMessages,
+        systemPrompt: agent!.systemPrompt,
+        agentId: agent!.id, // ← передаём agentId
+      }),
     });
     const data = await res.json();
     setMessages([...newMessages, { role: "assistant", content: data.response }]);
