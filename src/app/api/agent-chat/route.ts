@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 function extractExpenseData(text: string): { date: string; amount: string; category: string; description: string } | null {
-  const amountMatch = text.match(/(\d+[\d\s]*)\s*р/i);
+  // Ищем число с возможными пробелами и запятыми перед "р" или "руб"
+  const amountMatch = text.match(/(\d[\d\s,]*)\s*(?:р(?:уб)?\.?|₽)/i);
   if (!amountMatch) return null;
 
   const today = new Date().toLocaleDateString("ru-RU");
-  const amount = amountMatch[1].replace(/\s/g, "");
+  const amount = amountMatch[1].replace(/[\s,]/g, "");
 
   const categories = ["логистика", "реклама", "закупка", "зарплата", "налоги", "инструменты", "прочее"];
   const category = categories.find(c => text.toLowerCase().includes(c)) ?? "прочее";
