@@ -1,11 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { getAgent } from "@/config/agents";
 import { NextRequest, NextResponse } from "next/server";
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  baseURL: process.env.ANTHROPIC_BASE_URL,
-});
 
 const routerPrompt = `Ты Алекс, умный роутер AI-команды WB/Ozon магазина.
 Анализируй сообщения пользователя и определяй какой специалист должен ответить.
@@ -24,38 +18,39 @@ const routerPrompt = `Ты Алекс, умный роутер AI-команды
 - При нескольких темах — выбери ОСНОВНУЮ
 - Если непонятно — отправляй к chief-of-staff-alex`;
 
+async function callAI(systemPrompt: string, messages: { role: string; content: string }[], maxTokens = 1000) {
+  const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: maxTokens,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ],
+    }),
+  });
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { messages } = await req.json();
     const lastMessage = messages[messages.length - 1].content;
 
-    const routerRes = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 20,
-      system: routerPrompt,
-      messages: [{ role: "user", content: lastMessage }],
-    });
-
-    const agentId = routerRes.content[0].type === "text"
-      ? routerRes.content[0].text.trim()
-      : "chief-of-staff-alex";
-
+    const agentId = (await callAI(routerPrompt, [{ role: "user", content: lastMessage }], 20)).trim();
     const agent = getAgent(agentId) ?? getAgent("chief-of-staff-alex");
 
     if (!agent) {
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }
 
-    const agentRes = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      system: agent.systemPrompt,
-      messages,
-    });
-
-    const response = agentRes.content[0].type === "text"
-      ? agentRes.content[0].text
-      : "";
+    const response = await callAI(agent.systemPrompt, messages);
 
     return NextResponse.json({
       response,

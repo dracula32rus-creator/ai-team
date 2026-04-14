@@ -1,30 +1,31 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { agents } from "@/config/agents";
 import { NextRequest, NextResponse } from "next/server";
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  baseURL: process.env.ANTHROPIC_BASE_URL,
-});
 
 export async function POST(req: NextRequest) {
   try {
     const { message } = await req.json();
-
     const responses = [];
 
     for (const agent of agents) {
       try {
-        const res = await anthropic.messages.create({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 500,
-          system: agent.systemPrompt,
-          messages: [{ role: "user", content: message }],
+        const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 500,
+            messages: [
+              { role: "system", content: agent.systemPrompt },
+              { role: "user", content: message },
+            ],
+          }),
         });
 
-        const content = res.content[0].type === "text"
-          ? res.content[0].text
-          : "";
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content ?? "";
 
         responses.push({
           agentId: agent.id,
