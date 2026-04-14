@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
   });
 
   const data = await res.json();
+  console.log("AI Tunnel response:", JSON.stringify(data)); // ← добавь
   const text = data.choices?.[0]?.message?.content ?? "";
   return NextResponse.json({ response: text });
 }
