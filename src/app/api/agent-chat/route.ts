@@ -1,10 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 
+function detectCategory(text: string): string {
+  const t = text.toLowerCase();
+  if (t.match(/зп|зарплат|оклад|выплат/)) return "зарплата";
+  if (t.match(/аренд/)) return "аренда";
+  if (t.match(/короб|стрейч|плёнк|пленк|этикет|скотч|материал/)) return "материалы";
+  if (t.match(/упаков/)) return "упаковка";
+  if (t.match(/закуп|поставщик|китай|рынок/)) return "закупки";
+  if (t.match(/логистик|фрахт|карго|груз/)) return "логистика";
+  if (t.match(/курьер|вб|wb|озон|ozon|яндекс|сдэк|cdek|доставк/)) return "доставка";
+  if (t.match(/бартер/)) return "бартеры";
+  if (t.match(/реклам|блогер|маркетинг/)) return "реклама";
+  return "прочее";
+}
+
 function extractExpenseData(text: string): { date: string; amount: string; category: string; description: string } | null {
   const amountMatch = text.match(/(\d[\d\s,]*(?:\.\d+)?)\s*([кkтtмm]{1,2})?[\s]*(?:р(?:уб)?\.?|₽)?/i);
   if (!amountMatch || !amountMatch[1]) return null;
 
-  // Ищем дату в формате ДД.ММ или ДД.ММ.ГГГГ
   const dateMatch = text.match(/(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?/);
   let date: string;
   if (dateMatch) {
@@ -33,8 +46,7 @@ function extractExpenseData(text: string): { date: string; amount: string; categ
 
   if (isNaN(amount) || amount <= 0) return null;
 
-  const categories = ["логистика", "реклама", "закупка", "зарплата", "налоги", "инструменты", "бартер", "прочее"];
-  const category = categories.find(c => text.toLowerCase().includes(c)) ?? "прочее";
+  const category = detectCategory(text);
 
   return {
     date,
