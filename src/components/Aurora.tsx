@@ -14,7 +14,6 @@ export function Aurora({
 }: AuroraProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef<number>(0);
-  const timeRef = useRef<number>(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -30,7 +29,7 @@ export function Aurora({
     window.addEventListener("resize", resize);
 
     const blobs = colorStops.slice(0, -1).map((color, i) => ({
-      color,
+      color: color.slice(0, 7), // берём только первые 7 символов (#RRGGBB)
       x: (i + 1) / colorStops.length,
       y: 0.3 + i * 0.2,
       r: 0.4 + i * 0.1,
@@ -39,7 +38,6 @@ export function Aurora({
     }));
 
     const draw = () => {
-      timeRef.current += speed * 0.005;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       blobs.forEach((blob) => {
@@ -47,6 +45,9 @@ export function Aurora({
         blob.y += blob.vy;
         if (blob.x < 0 || blob.x > 1) blob.vx *= -1;
         if (blob.y < 0 || blob.y > 1) blob.vy *= -1;
+
+        const alpha = Math.round(blend * 255).toString(16).padStart(2, "0");
+        const colorWithAlpha = blob.color + alpha;
 
         const gradient = ctx.createRadialGradient(
           blob.x * canvas.width,
@@ -56,7 +57,7 @@ export function Aurora({
           blob.y * canvas.height,
           blob.r * canvas.width
         );
-        gradient.addColorStop(0, blob.color + Math.round(blend * 255).toString(16).padStart(2, "0"));
+        gradient.addColorStop(0, colorWithAlpha);
         gradient.addColorStop(1, "transparent");
 
         ctx.fillStyle = gradient;

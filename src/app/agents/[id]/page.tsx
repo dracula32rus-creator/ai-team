@@ -52,7 +52,7 @@ export default function AgentChat() {
 
       {/* Aurora фон */}
       <Aurora
-        colorStops={[agent.color, agent.color + "88", "#0a0a0a"]}
+        colorStops={[agent.color, agent.color, "#0a0a0a"]}
         blend={0.15}
         speed={0.3}
       />
