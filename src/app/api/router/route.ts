@@ -26,7 +26,7 @@ async function callAI(systemPrompt: string, messages: { role: string; content: s
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4.6",
       max_tokens: maxTokens,
       messages: [
         { role: "system", content: systemPrompt },
