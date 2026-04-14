@@ -2,7 +2,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getAgent } from "@/config/agents";
 import { NextRequest, NextResponse } from "next/server";
 
-const anthropic = new Anthropic();
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  baseURL: process.env.ANTHROPIC_BASE_URL,
+});
 
 const routerPrompt = `Ты Алекс, умный роутер AI-команды WB/Ozon магазина.
 Анализируй сообщения пользователя и определяй какой специалист должен ответить.
@@ -26,7 +29,6 @@ export async function POST(req: NextRequest) {
     const { messages } = await req.json();
     const lastMessage = messages[messages.length - 1].content;
 
-    // Шаг 1: роутер определяет агента
     const routerRes = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 20,
@@ -44,7 +46,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }
 
-    // Шаг 2: агент отвечает
     const agentRes = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1000,

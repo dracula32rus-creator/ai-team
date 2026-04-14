@@ -2,13 +2,15 @@ import Anthropic from "@anthropic-ai/sdk";
 import { agents } from "@/config/agents";
 import { NextRequest, NextResponse } from "next/server";
 
-const anthropic = new Anthropic();
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  baseURL: process.env.ANTHROPIC_BASE_URL,
+});
 
 export async function POST(req: NextRequest) {
   try {
     const { message } = await req.json();
 
-    // Запускаем всех агентов последовательно
     const responses = [];
 
     for (const agent of agents) {
