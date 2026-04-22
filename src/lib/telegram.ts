@@ -2,8 +2,9 @@ import { getAgent } from "@/config/agents";
 
 interface TelegramMessage {
   message_id: number;
-  chat: { id: number };
+  chat: { id: number; type: string };
   text?: string;
+  reply_to_message?: { from?: { username?: string; is_bot?: boolean } };
 }
 
 interface TelegramUpdate {
@@ -21,8 +22,26 @@ export async function handleTelegramMessage(
   const chatId = message.chat.id;
   const userText = message.text;
 
-  // Игнорируем команды типа /start
-  if (userText === "/start") {
+  // Получаем username бота
+  const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+  const me = await meRes.json();
+  const botUsername = me.result?.username;
+
+  const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
+
+  // В группе — отвечаем только если бота упомянули или ответили на его сообщение
+  if (isGroup && botUsername) {
+    const mention = `@${botUsername}`.toLowerCase();
+    const mentioned = userText.toLowerCase().includes(mention);
+    const repliedToBot = message.reply_to_message?.from?.username === botUsername;
+
+    if (!mentioned && !repliedToBot) {
+      return; // не упомянули — молчим
+    }
+  }
+
+  // Игнорируем команды /start
+  if (userText === "/start" || userText.startsWith("/start@")) {
     const agent = getAgent(agentId);
     await sendTelegramMessage(botToken, chatId, agent?.greeting ?? "Привет!");
     return;
@@ -34,15 +53,18 @@ export async function handleTelegramMessage(
     return;
   }
 
+  // Убираем упоминание бота из текста запроса
+  const cleanText = botUsername
+    ? userText.replace(new RegExp(`@${botUsername}`, "gi"), "").trim()
+    : userText;
+
   try {
-    // Показываем "печатает..."
     await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, action: "typing" }),
     });
 
-    // Запрос к AI
     const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
       method: "POST",
       headers: {
@@ -54,7 +76,7 @@ export async function handleTelegramMessage(
         max_tokens: 1024,
         messages: [
           { role: "system", content: agent.systemPrompt },
-          { role: "user", content: userText },
+          { role: "user", content: cleanText },
         ],
       }),
     });
@@ -66,7 +88,7 @@ export async function handleTelegramMessage(
 
     // Если это Таня — записываем расход в таблицу
     if (agentId === "accountant-tanya") {
-      const expense = extractExpenseData(userText);
+      const expense = extractExpenseData(cleanText);
       if (expense) {
         try {
           await fetch(`https://ai-team-42mz.vercel.app/api/sheets`, {
