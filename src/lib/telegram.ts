@@ -11,6 +11,24 @@ interface TelegramUpdate {
   message?: TelegramMessage;
 }
 
+function detectPlatform(text: string): string {
+  const t = text.toLowerCase();
+  if (t.match(/1688|таобао|оптом китай/)) return "1688";
+  if (t.match(/alibaba|алибаба/)) return "alibaba";
+  if (t.match(/amazon|амазон/)) return "amazon";
+  return "all";
+}
+
+async function searchProducts(query: string, platform: string) {
+  const res = await fetch("https://ai-team-42mz.vercel.app/api/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, platform }),
+  });
+  const data = await res.json();
+  return data.results ?? [];
+}
+
 export async function handleTelegramMessage(
   update: TelegramUpdate,
   agentId: string,
@@ -22,25 +40,22 @@ export async function handleTelegramMessage(
   const chatId = message.chat.id;
   const userText = message.text;
 
-  // Получаем username бота
   const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
   const me = await meRes.json();
   const botUsername = me.result?.username;
 
   const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
 
-  // В группе — отвечаем только если бота упомянули или ответили на его сообщение
   if (isGroup && botUsername) {
     const mention = `@${botUsername}`.toLowerCase();
     const mentioned = userText.toLowerCase().includes(mention);
     const repliedToBot = message.reply_to_message?.from?.username === botUsername;
 
     if (!mentioned && !repliedToBot) {
-      return; // не упомянули — молчим
+      return;
     }
   }
 
-  // Игнорируем команды /start
   if (userText === "/start" || userText.startsWith("/start@")) {
     const agent = getAgent(agentId);
     await sendTelegramMessage(botToken, chatId, agent?.greeting ?? "Привет!");
@@ -53,7 +68,6 @@ export async function handleTelegramMessage(
     return;
   }
 
-  // Убираем упоминание бота из текста запроса
   const cleanText = botUsername
     ? userText.replace(new RegExp(`@${botUsername}`, "gi"), "").trim()
     : userText;
@@ -65,6 +79,23 @@ export async function handleTelegramMessage(
       body: JSON.stringify({ chat_id: chatId, action: "typing" }),
     });
 
+    // Если это Лин — делаем реальный поиск перед ответом
+    let extraContext = "";
+    if (agentId === "scout-lin") {
+      const platform = detectPlatform(cleanText);
+      try {
+        const results = await searchProducts(cleanText, platform);
+        if (results.length > 0) {
+          extraContext = `\n\nSearch results from ${platform}:\n` +
+            results.map((r: { title: string; url: string; content: string }, i: number) =>
+              `${i + 1}. ${r.title}\nURL: ${r.url}\nОписание: ${r.content?.slice(0, 200)}`
+            ).join("\n\n");
+        }
+      } catch (e) {
+        console.error("Search failed:", e);
+      }
+    }
+
     const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
       method: "POST",
       headers: {
@@ -73,9 +104,9 @@ export async function handleTelegramMessage(
       },
       body: JSON.stringify({
         model: "claude-sonnet-4.6",
-        max_tokens: 1024,
+        max_tokens: 1500,
         messages: [
-          { role: "system", content: agent.systemPrompt },
+          { role: "system", content: agent.systemPrompt + extraContext },
           { role: "user", content: cleanText },
         ],
       }),
@@ -86,7 +117,6 @@ export async function handleTelegramMessage(
 
     await sendTelegramMessage(botToken, chatId, response);
 
-    // Если это Таня — записываем расход в таблицу
     if (agentId === "accountant-tanya") {
       const expense = extractExpenseData(cleanText);
       if (expense) {

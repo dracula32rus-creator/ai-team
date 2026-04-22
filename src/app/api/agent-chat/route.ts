@@ -34,30 +34,62 @@ function extractExpenseData(text: string): { date: string; amount: string; categ
   let amount = parseFloat(amountMatch[1].replace(/[\s,]/g, ""));
   const suffix = amountMatch[2]?.toLowerCase() ?? "";
 
-  if (suffix === "кк" || suffix === "kk") {
-    amount = amount * 1_000_000;
-  } else if (suffix === "к" || suffix === "k") {
-    amount = amount * 1_000;
-  } else if (suffix === "т" || suffix === "t") {
-    amount = amount * 1_000;
-  } else if (suffix === "м" || suffix === "m") {
-    amount = amount * 1_000_000;
-  }
+  if (suffix === "кк" || suffix === "kk") amount *= 1_000_000;
+  else if (suffix === "к" || suffix === "k" || suffix === "т" || suffix === "t") amount *= 1_000;
+  else if (suffix === "м" || suffix === "m") amount *= 1_000_000;
 
   if (isNaN(amount) || amount <= 0) return null;
-
-  const category = detectCategory(text);
 
   return {
     date,
     amount: String(Math.round(amount)),
-    category,
+    category: detectCategory(text),
     description: text,
   };
 }
 
+// Определяем платформу поиска из текста
+function detectPlatform(text: string): string {
+  const t = text.toLowerCase();
+  if (t.match(/1688|таобао|оптом китай/)) return "1688";
+  if (t.match(/alibaba|алибаба/)) return "alibaba";
+  if (t.match(/amazon|амазон/)) return "amazon";
+  return "all";
+}
+
+async function searchProducts(query: string, platform: string) {
+  const baseUrl = "https://ai-team-42mz.vercel.app";
+  const res = await fetch(`${baseUrl}/api/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, platform }),
+  });
+  const data = await res.json();
+  return data.results ?? [];
+}
+
 export async function POST(req: NextRequest) {
   const { messages, systemPrompt, agentId } = await req.json();
+
+  let extraContext = "";
+
+  // Если это Лин — ищем товары перед генерацией ответа
+  if (agentId === "scout-lin") {
+    const lastUserMessage = messages[messages.length - 1]?.content ?? "";
+    const platform = detectPlatform(lastUserMessage);
+
+    try {
+      const results = await searchProducts(lastUserMessage, platform);
+      if (results.length > 0) {
+        extraContext = `\n\nSearch results from ${platform}:\n` +
+          results.map((r: { title: string; url: string; content: string }, i: number) =>
+            `${i + 1}. ${r.title}\nURL: ${r.url}\nОписание: ${r.content?.slice(0, 200)}`
+          ).join("\n\n");
+      }
+    } catch (e) {
+      console.error("Search failed:", e);
+    }
+  }
 
   const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
     method: "POST",
@@ -67,9 +99,9 @@ export async function POST(req: NextRequest) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4.6",
-      max_tokens: 1024,
+      max_tokens: 1500,
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: systemPrompt + extraContext },
         ...messages,
       ],
     }),
