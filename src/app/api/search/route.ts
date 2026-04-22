@@ -4,39 +4,42 @@ export async function POST(req: NextRequest) {
   try {
     const { query, platform } = await req.json();
 
-    // Формируем поисковый запрос в зависимости от платформы
+    // Формируем запрос под платформу
     let searchQuery = query;
-    const domains: Record<string, string[]> = {
-      "1688": ["1688.com"],
-      "alibaba": ["alibaba.com"],
-      "amazon": ["amazon.com", "amazon.de"],
-      "all": ["1688.com", "alibaba.com", "amazon.com"],
-    };
-
-    const includeDomains = domains[platform] ?? domains.all;
-
     if (platform === "1688") {
-      searchQuery = `${query} 批发 供应商`; // "оптом поставщик" по-китайски
+      searchQuery = `site:1688.com ${query}`;
     } else if (platform === "alibaba") {
-      searchQuery = `${query} wholesale supplier`;
+      searchQuery = `site:alibaba.com ${query} wholesale`;
+    } else if (platform === "amazon") {
+      searchQuery = `site:amazon.com ${query}`;
+    } else {
+      searchQuery = `${query} site:1688.com OR site:alibaba.com OR site:amazon.com`;
     }
 
-    const res = await fetch("https://api.tavily.com/search", {
+    const res = await fetch("https://google.serper.dev/search", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "X-API-KEY": process.env.SERPER_API_KEY!,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
-        api_key: process.env.TAVILY_API_KEY,
-        query: searchQuery,
-        search_depth: "basic",
-        include_domains: includeDomains,
-        max_results: 5,
+        q: searchQuery,
+        num: 10,
+        gl: platform === "1688" ? "cn" : "us", // для 1688 китайский регион
       }),
     });
 
     const data = await res.json();
 
+    // Приводим к единому формату
+    const results = (data.organic ?? []).map((item: { title: string; link: string; snippet: string }) => ({
+      title: item.title,
+      url: item.link,
+      content: item.snippet,
+    }));
+
     return NextResponse.json({
-      results: data.results ?? [],
+      results,
       platform,
     });
   } catch (error) {
