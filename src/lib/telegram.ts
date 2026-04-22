@@ -1,9 +1,18 @@
 import { getAgent } from "@/config/agents";
 
+interface TelegramPhoto {
+  file_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
+}
+
 interface TelegramMessage {
   message_id: number;
   chat: { id: number; type: string };
   text?: string;
+  caption?: string;
+  photo?: TelegramPhoto[];
   reply_to_message?: { from?: { username?: string; is_bot?: boolean } };
 }
 
@@ -29,16 +38,77 @@ async function searchProducts(query: string, platform: string) {
   return data.results ?? [];
 }
 
+// Скачиваем фото из Telegram и конвертируем в base64
+async function getPhotoBase64(fileId: string, botToken: string): Promise<string | null> {
+  try {
+    const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+    const fileData = await fileRes.json();
+    const filePath = fileData.result?.file_path;
+    if (!filePath) return null;
+
+    const imageRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`);
+    const arrayBuffer = await imageRes.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    return base64;
+  } catch (e) {
+    console.error("Photo download error:", e);
+    return null;
+  }
+}
+
+// Просим AI описать что на фото
+async function describeImage(imageBase64: string): Promise<string> {
+  try {
+    const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4.6",
+        max_tokens: 300,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: `data:image/jpeg;base64,${imageBase64}` },
+              },
+              {
+                type: "text",
+                text: "Опиши товар на этой фотографии в 1-2 предложениях для поиска на маркетплейсе. Укажи тип товара, материал, цвет, ключевые особенности. Без лишних слов — только описание.",
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content ?? "";
+  } catch (e) {
+    console.error("Image describe error:", e);
+    return "";
+  }
+}
+
 export async function handleTelegramMessage(
   update: TelegramUpdate,
   agentId: string,
   botToken: string
 ) {
   const message = update.message;
-  if (!message?.text) return;
+  if (!message) return;
+
+  // Получаем текст или подпись к фото
+  const userText = message.text ?? message.caption ?? "";
+  const hasPhoto = message.photo && message.photo.length > 0;
+
+  if (!userText && !hasPhoto) return;
 
   const chatId = message.chat.id;
-  const userText = message.text;
 
   const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
   const me = await meRes.json();
@@ -79,17 +149,34 @@ export async function handleTelegramMessage(
       body: JSON.stringify({ chat_id: chatId, action: "typing" }),
     });
 
-    // Если это Лин — делаем реальный поиск перед ответом
+    // Если пришло фото — описываем его
+    let photoDescription = "";
+    if (hasPhoto) {
+      // Берём самое большое разрешение (последнее в массиве)
+      const largestPhoto = message.photo![message.photo!.length - 1];
+      const base64 = await getPhotoBase64(largestPhoto.file_id, botToken);
+      if (base64) {
+        photoDescription = await describeImage(base64);
+      }
+    }
+
+    // Собираем итоговый запрос: фото описание + текст пользователя
+    const finalQuery = [photoDescription, cleanText].filter(Boolean).join(". ");
+
+    // Если это Лин — делаем поиск
     let extraContext = "";
-    if (agentId === "scout-lin") {
-      const platform = detectPlatform(cleanText);
+    if (agentId === "scout-lin" && finalQuery) {
+      const platform = detectPlatform(finalQuery);
       try {
-        const results = await searchProducts(cleanText, platform);
+        const results = await searchProducts(finalQuery, platform);
         if (results.length > 0) {
           extraContext = `\n\nSearch results from ${platform}:\n` +
             results.map((r: { title: string; url: string; content: string }, i: number) =>
               `${i + 1}. ${r.title}\nURL: ${r.url}\nОписание: ${r.content?.slice(0, 200)}`
             ).join("\n\n");
+        }
+        if (photoDescription) {
+          extraContext += `\n\n[Photo was analyzed as: ${photoDescription}]`;
         }
       } catch (e) {
         console.error("Search failed:", e);
@@ -107,7 +194,7 @@ export async function handleTelegramMessage(
         max_tokens: 1500,
         messages: [
           { role: "system", content: agent.systemPrompt + extraContext },
-          { role: "user", content: cleanText },
+          { role: "user", content: finalQuery || "Проанализируй присланное фото" },
         ],
       }),
     });
