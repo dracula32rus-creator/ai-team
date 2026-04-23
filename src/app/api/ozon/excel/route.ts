@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     const res = await fetch("https://api-seller.ozon.ru/v3/finance/transaction/list", {
       method: "POST",
       headers: {
-        "Client-Id": process.env.OZON_CLIENT_ID!,
+        "Client-Id": String(process.env.OZON_CLIENT_ID),
         "Api-Key": process.env.OZON_API_KEY!,
         "Content-Type": "application/json",
       },

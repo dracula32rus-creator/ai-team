@@ -14,19 +14,24 @@ interface OzonTransaction {
 
 export async function POST(req: NextRequest) {
   try {
+    console.log("OZON_CLIENT_ID value:", JSON.stringify(process.env.OZON_CLIENT_ID));
+    console.log("OZON_CLIENT_ID length:", process.env.OZON_CLIENT_ID?.length);
+    console.log("OZON_API_KEY exists:", !!process.env.OZON_API_KEY);
+
     const { dateFrom, dateTo } = await req.json();
 
-    // Формируем даты по умолчанию — последние 30 дней
     const now = new Date();
     const defaultTo = dateTo ?? now.toISOString().split("T")[0];
     const defaultFrom = dateFrom ?? new Date(now.setDate(now.getDate() - 30)).toISOString().split("T")[0];
 
-    // Получаем отчёт по транзакциям
+    const clientId = (process.env.OZON_CLIENT_ID ?? "").trim();
+    const apiKey = (process.env.OZON_API_KEY ?? "").trim();
+
     const res = await fetch("https://api-seller.ozon.ru/v3/finance/transaction/list", {
       method: "POST",
       headers: {
-        "Client-Id": process.env.OZON_CLIENT_ID!,
-        "Api-Key": process.env.OZON_API_KEY!,
+        "Client-Id": clientId,
+        "Api-Key": apiKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -53,7 +58,6 @@ export async function POST(req: NextRequest) {
     const data = await res.json();
     const operations: OzonTransaction[] = data.result?.operations ?? [];
 
-    // Считаем сводку
     let totalRevenue = 0;
     let totalCommissions = 0;
     let totalLogistics = 0;
