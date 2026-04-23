@@ -67,19 +67,35 @@ async function searchProducts(query: string, platform: string) {
   return data.results ?? [];
 }
 
-// Определяем, нужно ли Финну тянуть отчёт из Ozon
 function needsOzonReport(text: string): boolean {
   const t = text.toLowerCase();
   return Boolean(
     t.match(/прибыль|выручк|доход|отчёт|отчет|продаж|юнит-эконом|unit-economics|комисс/) &&
-    t.match(/озон|ozon|маркетплейс|период|месяц|неделя|квартал|год/)
+    t.match(/озон|ozon|маркетплейс|период|месяц|неделя|квартал|год|сегодня|вчера|январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр/)
   );
 }
 
-// Вытаскиваем период из текста
-function extractPeriod(text: string): { from?: string; to?: string } {
+function extractPeriod(text: string): { from: string; to: string } {
   const now = new Date();
+  const year = now.getFullYear();
   const t = text.toLowerCase();
+
+  const months: Record<string, number> = {
+    "январ": 0, "феврал": 1, "март": 2, "апрел": 3,
+    "май": 4, "мая": 4, "июн": 5, "июл": 6, "август": 7,
+    "сентябр": 8, "октябр": 9, "ноябр": 10, "декабр": 11,
+  };
+
+  for (const [key, month] of Object.entries(months)) {
+    if (t.includes(key)) {
+      const from = new Date(year, month, 1);
+      const to = new Date(year, month + 1, 0);
+      return {
+        from: from.toISOString().split("T")[0],
+        to: to.toISOString().split("T")[0],
+      };
+    }
+  }
 
   if (t.includes("сегодня")) {
     const today = now.toISOString().split("T")[0];
@@ -96,12 +112,6 @@ function extractPeriod(text: string): { from?: string; to?: string } {
     weekAgo.setDate(weekAgo.getDate() - 7);
     return { from: weekAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
   }
-  if (t.match(/месяц/)) {
-    const monthAgo = new Date(now);
-    monthAgo.setDate(monthAgo.getDate() - 30);
-    return { from: monthAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
-  }
-  // По умолчанию — последние 30 дней
   const monthAgo = new Date(now);
   monthAgo.setDate(monthAgo.getDate() - 30);
   return { from: monthAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
@@ -122,13 +132,12 @@ export async function POST(req: NextRequest) {
 
   let extraContext = "";
 
-  // Если это Финн и вопрос про деньги — тянем отчёт Ozon
   if (agentId === "cfo-finn") {
     const lastUserMessage = messages[messages.length - 1]?.content ?? "";
     if (needsOzonReport(lastUserMessage)) {
       try {
         const period = extractPeriod(lastUserMessage);
-        const report = await getOzonReport(period.from!, period.to!);
+        const report = await getOzonReport(period.from, period.to);
         if (report.summary) {
           extraContext = `\n\n[LIVE OZON DATA for period ${report.period.from} to ${report.period.to}]
 Выручка: ${report.summary.totalRevenue} ₽
@@ -147,7 +156,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Если это Лин — ищем товары
   if (agentId === "scout-lin") {
     const lastUserMessage = messages[messages.length - 1]?.content ?? "";
     const platform = detectPlatform(lastUserMessage);

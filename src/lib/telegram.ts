@@ -42,13 +42,31 @@ function needsOzonReport(text: string): boolean {
   const t = text.toLowerCase();
   return Boolean(
     t.match(/прибыль|выручк|доход|отчёт|отчет|продаж|юнит-эконом|unit-economics|комисс/) &&
-    t.match(/озон|ozon|маркетплейс|период|месяц|неделя|квартал|год|сегодня|вчера/)
+    t.match(/озон|ozon|маркетплейс|период|месяц|неделя|квартал|год|сегодня|вчера|январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр/)
   );
 }
 
 function extractPeriod(text: string): { from: string; to: string } {
   const now = new Date();
+  const year = now.getFullYear();
   const t = text.toLowerCase();
+
+  const months: Record<string, number> = {
+    "январ": 0, "феврал": 1, "март": 2, "апрел": 3,
+    "май": 4, "мая": 4, "июн": 5, "июл": 6, "август": 7,
+    "сентябр": 8, "октябр": 9, "ноябр": 10, "декабр": 11,
+  };
+
+  for (const [key, month] of Object.entries(months)) {
+    if (t.includes(key)) {
+      const from = new Date(year, month, 1);
+      const to = new Date(year, month + 1, 0);
+      return {
+        from: from.toISOString().split("T")[0],
+        to: to.toISOString().split("T")[0],
+      };
+    }
+  }
 
   if (t.includes("сегодня")) {
     const today = now.toISOString().split("T")[0];
@@ -79,7 +97,6 @@ async function getOzonReport(dateFrom: string, dateTo: string) {
   return await res.json();
 }
 
-// Скачиваем Excel файл из нашего API и отправляем в Telegram
 async function sendOzonExcel(
   botToken: string,
   chatId: number,
@@ -98,7 +115,6 @@ async function sendOzonExcel(
     const buffer = Buffer.from(await res.arrayBuffer());
     const fileName = `ozon-report-${dateFrom}-${dateTo}.xlsx`;
 
-    // Отправляем файл в Telegram через multipart/form-data
     const formData = new FormData();
     formData.append("chat_id", String(chatId));
     formData.append("caption", `📊 Отчёт Ozon: ${dateFrom} — ${dateTo}`);
@@ -242,7 +258,6 @@ export async function handleTelegramMessage(
     let extraContext = "";
     let ozonReportPeriod: { from: string; to: string } | null = null;
 
-    // Если это Финн и вопрос про деньги — тянем отчёт Ozon
     if (agentId === "cfo-finn" && needsOzonReport(finalQuery)) {
       try {
         const period = extractPeriod(finalQuery);
@@ -265,7 +280,6 @@ export async function handleTelegramMessage(
       }
     }
 
-    // Если это Лин — делаем поиск
     if (agentId === "scout-lin" && finalQuery) {
       const platform = detectPlatform(finalQuery);
       try {
@@ -305,7 +319,6 @@ export async function handleTelegramMessage(
 
     await sendTelegramMessage(botToken, chatId, response);
 
-    // Если Финн составлял отчёт — отправляем Excel файлом
     if (ozonReportPeriod) {
       await sendOzonExcel(botToken, chatId, ozonReportPeriod.from, ozonReportPeriod.to);
     }
