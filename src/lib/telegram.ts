@@ -38,7 +38,88 @@ async function searchProducts(query: string, platform: string) {
   return data.results ?? [];
 }
 
-// Скачиваем фото из Telegram и конвертируем в base64
+function needsOzonReport(text: string): boolean {
+  const t = text.toLowerCase();
+  return Boolean(
+    t.match(/прибыль|выручк|доход|отчёт|отчет|продаж|юнит-эконом|unit-economics|комисс/) &&
+    t.match(/озон|ozon|маркетплейс|период|месяц|неделя|квартал|год|сегодня|вчера/)
+  );
+}
+
+function extractPeriod(text: string): { from: string; to: string } {
+  const now = new Date();
+  const t = text.toLowerCase();
+
+  if (t.includes("сегодня")) {
+    const today = now.toISOString().split("T")[0];
+    return { from: today, to: today };
+  }
+  if (t.match(/вчера/)) {
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const d = yesterday.toISOString().split("T")[0];
+    return { from: d, to: d };
+  }
+  if (t.match(/недел/)) {
+    const weekAgo = new Date(now);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    return { from: weekAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
+  }
+  const monthAgo = new Date(now);
+  monthAgo.setDate(monthAgo.getDate() - 30);
+  return { from: monthAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
+}
+
+async function getOzonReport(dateFrom: string, dateTo: string) {
+  const res = await fetch("https://ai-team-42mz.vercel.app/api/ozon/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dateFrom, dateTo }),
+  });
+  return await res.json();
+}
+
+// Скачиваем Excel файл из нашего API и отправляем в Telegram
+async function sendOzonExcel(
+  botToken: string,
+  chatId: number,
+  dateFrom: string,
+  dateTo: string
+): Promise<boolean> {
+  try {
+    const res = await fetch("https://ai-team-42mz.vercel.app/api/ozon/excel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dateFrom, dateTo }),
+    });
+
+    if (!res.ok) return false;
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const fileName = `ozon-report-${dateFrom}-${dateTo}.xlsx`;
+
+    // Отправляем файл в Telegram через multipart/form-data
+    const formData = new FormData();
+    formData.append("chat_id", String(chatId));
+    formData.append("caption", `📊 Отчёт Ozon: ${dateFrom} — ${dateTo}`);
+    formData.append(
+      "document",
+      new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      fileName
+    );
+
+    const sendRes = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
+      method: "POST",
+      body: formData,
+    });
+
+    return sendRes.ok;
+  } catch (e) {
+    console.error("Excel send error:", e);
+    return false;
+  }
+}
+
 async function getPhotoBase64(fileId: string, botToken: string): Promise<string | null> {
   try {
     const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
@@ -56,7 +137,6 @@ async function getPhotoBase64(fileId: string, botToken: string): Promise<string 
   }
 }
 
-// Просим AI описать что на фото
 async function describeImage(imageBase64: string): Promise<string> {
   try {
     const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
@@ -102,7 +182,6 @@ export async function handleTelegramMessage(
   const message = update.message;
   if (!message) return;
 
-  // Получаем текст или подпись к фото
   const userText = message.text ?? message.caption ?? "";
   const hasPhoto = message.photo && message.photo.length > 0;
 
@@ -149,10 +228,8 @@ export async function handleTelegramMessage(
       body: JSON.stringify({ chat_id: chatId, action: "typing" }),
     });
 
-    // Если пришло фото — описываем его
     let photoDescription = "";
     if (hasPhoto) {
-      // Берём самое большое разрешение (последнее в массиве)
       const largestPhoto = message.photo![message.photo!.length - 1];
       const base64 = await getPhotoBase64(largestPhoto.file_id, botToken);
       if (base64) {
@@ -160,11 +237,35 @@ export async function handleTelegramMessage(
       }
     }
 
-    // Собираем итоговый запрос: фото описание + текст пользователя
     const finalQuery = [photoDescription, cleanText].filter(Boolean).join(". ");
 
-    // Если это Лин — делаем поиск
     let extraContext = "";
+    let ozonReportPeriod: { from: string; to: string } | null = null;
+
+    // Если это Финн и вопрос про деньги — тянем отчёт Ozon
+    if (agentId === "cfo-finn" && needsOzonReport(finalQuery)) {
+      try {
+        const period = extractPeriod(finalQuery);
+        ozonReportPeriod = period;
+        const report = await getOzonReport(period.from, period.to);
+        if (report.summary) {
+          extraContext = `\n\n[LIVE OZON DATA for period ${report.period.from} to ${report.period.to}]
+Выручка: ${report.summary.totalRevenue} ₽
+Комиссии маркетплейса: ${report.summary.totalCommissions} ₽
+Логистика: ${report.summary.totalLogistics} ₽
+Возвраты: ${report.summary.totalReturns} ₽
+Чистая прибыль до расходов: ${report.summary.netProfit} ₽
+Заказов доставлено: ${report.summary.ordersCount}
+Возвратов: ${report.summary.returnsCount}
+
+Используй эти реальные цифры из Ozon API в своём ответе. В конце обязательно напиши: "📎 Excel с детализацией отправлен отдельным файлом". Помни — это только маркетплейс, без учёта твоих внутренних расходов (зарплата, аренда, материалы и т.д.).`;
+        }
+      } catch (e) {
+        console.error("Ozon report failed:", e);
+      }
+    }
+
+    // Если это Лин — делаем поиск
     if (agentId === "scout-lin" && finalQuery) {
       const platform = detectPlatform(finalQuery);
       try {
@@ -203,6 +304,11 @@ export async function handleTelegramMessage(
     const response = data.choices?.[0]?.message?.content ?? "Не смог ответить, попробуй ещё раз.";
 
     await sendTelegramMessage(botToken, chatId, response);
+
+    // Если Финн составлял отчёт — отправляем Excel файлом
+    if (ozonReportPeriod) {
+      await sendOzonExcel(botToken, chatId, ozonReportPeriod.from, ozonReportPeriod.to);
+    }
 
     if (agentId === "accountant-tanya") {
       const expense = extractExpenseData(cleanText);

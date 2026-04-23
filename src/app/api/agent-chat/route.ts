@@ -14,7 +14,7 @@ function detectCategory(text: string): string {
   return "прочее";
 }
 
-function extractExpenseData(text: string): { date: string; amount: string; category: string; description: string } | null {
+function extractExpenseData(text: string) {
   const amountMatch = text.match(/(\d[\d\s,]*(?:\.\d+)?)\s*([кkтtмm]{1,2})?[\s]*(?:р(?:уб)?\.?|₽)?/i);
   if (!amountMatch || !amountMatch[1]) return null;
 
@@ -48,7 +48,6 @@ function extractExpenseData(text: string): { date: string; amount: string; categ
   };
 }
 
-// Определяем платформу поиска из текста
 function detectPlatform(text: string): string {
   const t = text.toLowerCase();
   if (t.match(/1688|таобао|оптом китай/)) return "1688";
@@ -68,12 +67,87 @@ async function searchProducts(query: string, platform: string) {
   return data.results ?? [];
 }
 
+// Определяем, нужно ли Финну тянуть отчёт из Ozon
+function needsOzonReport(text: string): boolean {
+  const t = text.toLowerCase();
+  return Boolean(
+    t.match(/прибыль|выручк|доход|отчёт|отчет|продаж|юнит-эконом|unit-economics|комисс/) &&
+    t.match(/озон|ozon|маркетплейс|период|месяц|неделя|квартал|год/)
+  );
+}
+
+// Вытаскиваем период из текста
+function extractPeriod(text: string): { from?: string; to?: string } {
+  const now = new Date();
+  const t = text.toLowerCase();
+
+  if (t.includes("сегодня")) {
+    const today = now.toISOString().split("T")[0];
+    return { from: today, to: today };
+  }
+  if (t.match(/вчера/)) {
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const d = yesterday.toISOString().split("T")[0];
+    return { from: d, to: d };
+  }
+  if (t.match(/недел/)) {
+    const weekAgo = new Date(now);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    return { from: weekAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
+  }
+  if (t.match(/месяц/)) {
+    const monthAgo = new Date(now);
+    monthAgo.setDate(monthAgo.getDate() - 30);
+    return { from: monthAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
+  }
+  // По умолчанию — последние 30 дней
+  const monthAgo = new Date(now);
+  monthAgo.setDate(monthAgo.getDate() - 30);
+  return { from: monthAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
+}
+
+async function getOzonReport(dateFrom: string, dateTo: string) {
+  const baseUrl = "https://ai-team-42mz.vercel.app";
+  const res = await fetch(`${baseUrl}/api/ozon/report`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dateFrom, dateTo }),
+  });
+  return await res.json();
+}
+
 export async function POST(req: NextRequest) {
   const { messages, systemPrompt, agentId } = await req.json();
 
   let extraContext = "";
 
-  // Если это Лин — ищем товары перед генерацией ответа
+  // Если это Финн и вопрос про деньги — тянем отчёт Ozon
+  if (agentId === "cfo-finn") {
+    const lastUserMessage = messages[messages.length - 1]?.content ?? "";
+    if (needsOzonReport(lastUserMessage)) {
+      try {
+        const period = extractPeriod(lastUserMessage);
+        const report = await getOzonReport(period.from!, period.to!);
+        if (report.summary) {
+          extraContext = `\n\n[LIVE OZON DATA for period ${report.period.from} to ${report.period.to}]
+Выручка: ${report.summary.totalRevenue} ₽
+Комиссии маркетплейса: ${report.summary.totalCommissions} ₽
+Логистика: ${report.summary.totalLogistics} ₽
+Возвраты: ${report.summary.totalReturns} ₽
+Чистая прибыль до расходов: ${report.summary.netProfit} ₽
+Заказов доставлено: ${report.summary.ordersCount}
+Возвратов: ${report.summary.returnsCount}
+
+Используй эти реальные цифры из Ozon API в своём ответе. Помни — это только маркетплейс, без учёта твоих внутренних расходов (зарплата, аренда, материалы и т.д.).`;
+        }
+      } catch (e) {
+        console.error("Ozon report failed:", e);
+      }
+    }
+  }
+
+  // Если это Лин — ищем товары
   if (agentId === "scout-lin") {
     const lastUserMessage = messages[messages.length - 1]?.content ?? "";
     const platform = detectPlatform(lastUserMessage);
