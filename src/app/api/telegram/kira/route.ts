@@ -83,12 +83,20 @@ function formatTask(task: Record<string, string | number>) {
 }
 
 function parseManualTask(text: string) {
-  const assigneeMatch = text.match(/для\s+@?(\w+)/i);
+  // Ищем всех исполнителей: "для @вася и @петя" или "для @вася, @петя"
+  const assigneeMatches = [...text.matchAll(/для\s+@?(\w+)/gi)];
+  const additionalMatches = [...text.matchAll(/[,и]\s*@(\w+)/gi)];
+
+  const assignees = [
+    ...assigneeMatches.map(m => m[1]),
+    ...additionalMatches.map(m => m[1]),
+  ].filter(Boolean);
+
   const controllerMatch = text.match(/контролёр[:\s]+@?(\w+)/i) ?? text.match(/контролер[:\s]+@?(\w+)/i);
   const deadline = parseDeadline(text);
 
   return {
-    assignee: assigneeMatch?.[1] ?? null,
+    assignees: [...new Set(assignees)],
     controller: controllerMatch?.[1] ?? null,
     deadline,
   };
@@ -154,9 +162,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (created > 0) {
-      await sendMessage(token, chatId,
-        `📋 Зафиксировала ${created} задач от *${memberName}*`
-      );
+      await sendMessage(token, chatId, `📋 Зафиксировала ${created} задач от *${memberName}*`);
     }
     return NextResponse.json({ ok: true });
   }
@@ -239,10 +245,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // Создать задачу вручную
+  // Создать задачу вручную — поддержка нескольких исполнителей
   if (t.match(/задача|задание/) && t.match(/для/)) {
     const parsed = parseManualTask(cleanText);
-    if (!parsed.assignee) {
+
+    if (!parsed.assignees.length) {
       await sendMessage(token, chatId, "❓ Укажи исполнителя: *для @имя*");
       return NextResponse.json({ ok: true });
     }
@@ -250,25 +257,34 @@ export async function POST(req: NextRequest) {
     const title = cleanText
       .replace(/задача[:\s]*/i, "")
       .replace(/для\s+@?\w+/gi, "")
+      .replace(/[,и]\s*@\w+/gi, "")
       .replace(/до\s+[\d.\/-]+/gi, "")
       .replace(/контролёр[:\s]+@?\w+/gi, "")
+      .replace(/контролер[:\s]+@?\w+/gi, "")
       .trim();
 
-    const assigneeName = getMemberName(parsed.assignee);
-    const { data } = await supabase.from("tasks").insert({
-      title,
-      assignee: assigneeName,
-      assignee_username: parsed.assignee,
-      controller: parsed.controller ? getMemberName(parsed.controller) : null,
-      controller_username: parsed.controller,
-      deadline: parsed.deadline,
-      chat_id: chatId,
-      message_id: messageId,
-      status: "новая",
-    }).select().single();
+    const created = [];
+    for (const assigneeRaw of parsed.assignees) {
+      const assigneeName = getMemberName(assigneeRaw);
+      const { data } = await supabase.from("tasks").insert({
+        title,
+        assignee: assigneeName,
+        assignee_username: assigneeRaw,
+        controller: parsed.controller ? getMemberName(parsed.controller) : null,
+        controller_username: parsed.controller,
+        deadline: parsed.deadline,
+        chat_id: chatId,
+        message_id: messageId,
+        status: "новая",
+      }).select().single();
+      if (data) created.push(data);
+    }
 
-    if (data) {
-      await sendMessage(token, chatId, `✅ Задача создана!\n\n${formatTask(data as Record<string, string | number>)}`);
+    if (created.length > 0) {
+      const msg = created.map(d => formatTask(d as Record<string, string | number>)).join("\n\n");
+      await sendMessage(token, chatId,
+        `✅ Создано ${created.length} ${created.length === 1 ? "задача" : "задачи"}!\n\n${msg}`
+      );
     }
     return NextResponse.json({ ok: true });
   }
@@ -278,8 +294,11 @@ export async function POST(req: NextRequest) {
 
 *Автоматически* фиксирую нумерованные списки задач в чате.
 
-*Создать вручную:*
+*Создать одному:*
 задача для @вася: сделать карточку до 25.05
+
+*Создать нескольким:*
+задача для @надя и @рита: обновить карточки до 20.05
 
 *Посмотреть:*
 все задачи
