@@ -19,6 +19,7 @@ interface Member {
   accent: string;
   bg: string;
   emoji: string;
+  avatar: string;
 }
 
 const TEAM: Member[] = [
@@ -31,6 +32,7 @@ const TEAM: Member[] = [
     accent: "#FFD700",
     bg: "linear-gradient(135deg, #1a1400 0%, #2a2000 100%)",
     emoji: "👑",
+    avatar: "/avatars/sergey.jpg",
   },
   {
     name: "Кирилл",
@@ -41,6 +43,7 @@ const TEAM: Member[] = [
     accent: "#C4374F",
     bg: "linear-gradient(135deg, #120006 0%, #200010 100%)",
     emoji: "⚡",
+    avatar: "/avatars/kirill.jpg",
   },
   {
     name: "Надя",
@@ -51,6 +54,7 @@ const TEAM: Member[] = [
     accent: "#A855F7",
     bg: "linear-gradient(135deg, #0d0014 0%, #1a0029 100%)",
     emoji: "🟣",
+    avatar: "/avatars/nadya.jpg",
   },
   {
     name: "Рита",
@@ -61,6 +65,7 @@ const TEAM: Member[] = [
     accent: "#33BBEE",
     bg: "linear-gradient(135deg, #000d1a 0%, #001829 100%)",
     emoji: "🔵",
+    avatar: "/avatars/rita.jpg",
   },
   {
     name: "Вадим",
@@ -71,6 +76,7 @@ const TEAM: Member[] = [
     accent: "#4DFFCC",
     bg: "linear-gradient(135deg, #001a12 0%, #00291e 100%)",
     emoji: "📦",
+    avatar: "/avatars/vadim.jpg",
   },
   {
     name: "Настя",
@@ -81,6 +87,7 @@ const TEAM: Member[] = [
     accent: "#FF80B4",
     bg: "linear-gradient(135deg, #1a0010 0%, #29001a 100%)",
     emoji: "🎯",
+    avatar: "/avatars/nastya.jpg",
   },
 ];
 
@@ -131,15 +138,19 @@ function MemberCard({ member, tasks, onClick }: { member: Member; tasks: Task[];
               animationDelay: `${i * 0.4}s`,
             }} />
           ))}
-          <div style={{
-            position: "absolute", inset: 10, borderRadius: "50%",
-            background: member.color + "22",
-            border: `2px solid ${member.color}`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 20,
-          }}>
-            {member.emoji}
-          </div>
+          <img
+            src={member.avatar}
+            alt={member.name}
+            style={{
+              position: "absolute",
+              inset: 6,
+              borderRadius: "50%",
+              width: "calc(100% - 12px)",
+              height: "calc(100% - 12px)",
+              objectFit: "cover",
+              border: `2px solid ${member.color}`,
+            }}
+          />
         </div>
 
         <div style={{ flex: 1 }}>
@@ -221,13 +232,19 @@ function MemberModal({ member, tasks, onClose }: { member: Member; tasks: Task[]
                 animationDelay: `${i * 0.3}s`,
               }} />
             ))}
-            <div style={{
-              position: "absolute", inset: 14, borderRadius: "50%",
-              background: member.color + "22",
-              border: `2px solid ${member.color}`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 28,
-            }}>{member.emoji}</div>
+            <img
+              src={member.avatar}
+              alt={member.name}
+              style={{
+                position: "absolute",
+                inset: 8,
+                borderRadius: "50%",
+                width: "calc(100% - 16px)",
+                height: "calc(100% - 16px)",
+                objectFit: "cover",
+                border: `2px solid ${member.color}`,
+              }}
+            />
           </div>
           <div>
             <div style={{ fontSize: 28, fontWeight: 800, color: "#fff" }}>{member.name}</div>
