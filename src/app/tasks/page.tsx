@@ -78,6 +78,7 @@ const STATUS_COLUMNS = [
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState("");
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [time, setTime] = useState(new Date());
@@ -94,6 +95,12 @@ export default function TasksPage() {
     const data = await res.json();
     setTasks(data.tasks ?? []);
     setLoading(false);
+  }
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await fetchTasks();
+    setTimeout(() => setRefreshing(false), 600);
   }
 
   async function updateStatus(id: number, status: string) {
@@ -143,6 +150,10 @@ export default function TasksPage() {
         @keyframes pulse {
           0% { transform: scale(1); opacity: 0.8; }
           100% { transform: scale(2.5); opacity: 0; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: #111; }
@@ -216,13 +227,13 @@ export default function TasksPage() {
                 }}
               >
                 <div style={{ position: "relative", width: 36, height: 36, flexShrink: 0 }}>
-                  {isSelected && [0].map(i => (
-                    <div key={i} style={{
-                      position: "absolute", inset: i * 4, borderRadius: "50%",
+                  {isSelected && (
+                    <div style={{
+                      position: "absolute", inset: 0, borderRadius: "50%",
                       border: `1.5px solid ${member.color}`,
                       opacity: 0.5, animation: `pulse 2s ease-out infinite`,
                     }} />
-                  ))}
+                  )}
                   <img
                     src={member.avatar}
                     alt={member.name}
@@ -249,8 +260,8 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Поиск */}
-      <div style={{ padding: "16px 40px" }}>
+      {/* Поиск + кнопка обновления */}
+      <div style={{ padding: "16px 40px", display: "flex", gap: 12, alignItems: "center" }}>
         <input
           placeholder="Поиск по задаче..."
           value={filter}
@@ -260,6 +271,26 @@ export default function TasksPage() {
             padding: "8px 16px", color: "#fff", fontSize: 14, width: 300, outline: "none",
           }}
         />
+        <button
+          onClick={handleRefresh}
+          style={{
+            background: "#ffffff08", border: "1px solid #ffffff11",
+            borderRadius: 8, padding: "8px 14px", color: "#888",
+            fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLButtonElement).style.color = "#fff";
+            (e.currentTarget as HTMLButtonElement).style.background = "#ffffff14";
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLButtonElement).style.color = "#888";
+            (e.currentTarget as HTMLButtonElement).style.background = "#ffffff08";
+          }}
+        >
+          <span style={{ display: "inline-block", animation: refreshing ? "spin 0.6s linear" : "none" }}>🔄</span>
+          {refreshing ? "Обновляю..." : "Обновить"}
+        </button>
       </div>
 
       {/* Доска задач */}
