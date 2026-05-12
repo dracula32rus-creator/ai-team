@@ -15,19 +15,19 @@ async function sendMessage(token: string, chatId: number, text: string) {
 }
 
 function parseTask(text: string) {
-  const deadlineMatch = text.match(/до\s+(\d{1,2}[.\/-]\d{1,2}(?:[.\/-]\d{2,4})?)/i);
-  const assigneeMatch = text.match(/для\s+@?(\w+)/i) ?? text.match(/исполнитель[:\s]+@?(\w+)/i);
+  const assigneeMatch = text.match(/для\s+@?(\w+)/i);
   const controllerMatch = text.match(/контролёр[:\s]+@?(\w+)/i) ?? text.match(/контролер[:\s]+@?(\w+)/i);
+
+  const deadlineMatch = text.match(/до\s+(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{2,4}))?/i);
 
   let deadline: string | null = null;
   if (deadlineMatch) {
-    const parts = deadlineMatch[1].split(/[.\/-]/);
-    if (parts.length >= 2) {
-      const day = parts[0].padStart(2, "0");
-      const month = parts[1].padStart(2, "0");
-      const year = parts[2] ? (parts[2].length === 2 ? `20${parts[2]}` : parts[2]) : new Date().getFullYear();
-      deadline = `${year}-${month}-${day}`;
-    }
+    const day = deadlineMatch[1].padStart(2, "0");
+    const month = deadlineMatch[2].padStart(2, "0");
+    const year = deadlineMatch[3]
+      ? (deadlineMatch[3].length === 2 ? `20${deadlineMatch[3]}` : deadlineMatch[3])
+      : new Date().getFullYear();
+    deadline = `${year}-${month}-${day}`;
   }
 
   return {
@@ -56,16 +56,15 @@ export async function POST(req: NextRequest) {
   const chatId = message.chat.id;
   const text = message.text;
   const token = process.env.TELEGRAM_TOKEN_KIRA!;
-  const botUsername = "kira";
 
   const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
   if (isGroup) {
-    const mentioned = text.toLowerCase().includes(`@${botUsername}`);
+    const mentioned = text.toLowerCase().includes(`@kira_wb_ozon_bot`);
     const replied = message.reply_to_message?.from?.is_bot;
     if (!mentioned && !replied) return NextResponse.json({ ok: true });
   }
 
-  const cleanText = text.replace(/@\w+/g, "").trim();
+  const cleanText = text.replace(/@kira_wb_ozon_bot/gi, "").trim();
   const t = cleanText.toLowerCase();
 
   // Показать все задачи
@@ -90,7 +89,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Задачи конкретного человека
-  const whoMatch = cleanText.match(/задачи\s+(\w+)/i);
+  const whoMatch = cleanText.match(/задачи\s+@?(\w+)/i);
   if (whoMatch) {
     const { data } = await supabase.from("tasks").select("*").ilike("assignee", `%${whoMatch[1]}%`);
     if (!data?.length) {
@@ -112,32 +111,33 @@ export async function POST(req: NextRequest) {
   }
 
   // Сдвинуть дедлайн
-  const deadlineMatch = cleanText.match(/задача\s+#?(\d+).*?до\s+(\d{1,2}[.\/-]\d{1,2}(?:[.\/-]\d{2,4})?)/i);
-  if (deadlineMatch) {
-    const parts = deadlineMatch[2].split(/[.\/-]/);
-    const day = parts[0].padStart(2, "0");
-    const month = parts[1].padStart(2, "0");
-    const year = parts[2] ? (parts[2].length === 2 ? `20${parts[2]}` : parts[2]) : new Date().getFullYear();
+  const shiftMatch = cleanText.match(/задача\s+#?(\d+).*?до\s+(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{2,4}))?/i);
+  if (shiftMatch) {
+    const day = shiftMatch[2].padStart(2, "0");
+    const month = shiftMatch[3].padStart(2, "0");
+    const year = shiftMatch[4] ? (shiftMatch[4].length === 2 ? `20${shiftMatch[4]}` : shiftMatch[4]) : new Date().getFullYear();
     const newDeadline = `${year}-${month}-${day}`;
-    const { data } = await supabase.from("tasks").update({ deadline: newDeadline, updated_at: new Date().toISOString() }).eq("id", deadlineMatch[1]).select().single();
+    const { data } = await supabase.from("tasks").update({ deadline: newDeadline, updated_at: new Date().toISOString() }).eq("id", shiftMatch[1]).select().single();
     if (data) await sendMessage(token, chatId, `📅 Дедлайн задачи #${data.id} перенесён на ${day}.${month}.${year}`);
     return NextResponse.json({ ok: true });
   }
 
   // Создать задачу
-  if (t.match(/задача|задание|сделать|выполнить/) && t.match(/для|исполнитель/)) {
+  if (t.match(/задача|задание|сделать|выполнить/) && t.match(/для/)) {
     const parsed = parseTask(cleanText);
-    const title = cleanText
-      .replace(/задача[:\s]*/i, "")
-      .replace(/для\s+@?\w+/gi, "")
-      .replace(/до\s+[\d.\/-]+/gi, "")
-      .replace(/контролёр[:\s]+@?\w+/gi, "")
-      .trim();
 
     if (!parsed.assignee) {
       await sendMessage(token, chatId, "❓ Укажи исполнителя: *для @имя*");
       return NextResponse.json({ ok: true });
     }
+
+    const title = cleanText
+      .replace(/задача[:\s]*/i, "")
+      .replace(/для\s+@?\w+/gi, "")
+      .replace(/до\s+[\d.\/-]+/gi, "")
+      .replace(/контролёр[:\s]+@?\w+/gi, "")
+      .replace(/контролер[:\s]+@?\w+/gi, "")
+      .trim();
 
     const { data } = await supabase.from("tasks").insert({
       title,
