@@ -10,6 +10,7 @@ interface Task {
   deadline?: string;
   status: string;
   created_at: string;
+  archived?: boolean;
 }
 
 interface Member {
@@ -75,13 +76,262 @@ const STATUS_COLUMNS = [
   { key: "просрочена", label: "Просрочено", color: "#EF4444", emoji: "🔴" },
 ];
 
+function StatBar({ value, max, color }: { value: number; max: number; color: string }) {
+  const pct = max > 0 ? (value / max) * 100 : 0;
+  return (
+    <div style={{ height: 4, background: "#ffffff11", borderRadius: 4, overflow: "hidden", marginTop: 4 }}>
+      <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 4, transition: "width 0.8s ease" }} />
+    </div>
+  );
+}
+
+function SidePanel({
+  open, onClose, tasks, allTasks
+}: {
+  open: boolean;
+  onClose: () => void;
+  tasks: Task[];
+  allTasks: Task[];
+}) {
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+
+  const memberStats = TEAM.map(m => {
+    const mt = allTasks.filter(t => t.assignee === m.name);
+    const done = mt.filter(t => t.status === "выполнена" && !t.archived).length;
+    const active = mt.filter(t => t.status !== "выполнена" && !t.archived).length;
+    const overdue = mt.filter(t => t.status === "просрочена" && !t.archived).length;
+    const archived = mt.filter(t => t.archived).length;
+    const total = mt.filter(t => !t.archived).length;
+    const rate = total > 0 ? Math.round((done / (total + archived)) * 100) : 0;
+    return { member: m, done, active, overdue, archived, total, rate };
+  });
+
+  const selected = selectedMember
+    ? memberStats.find(s => s.member.name === selectedMember.name)
+    : null;
+
+  const memberTasks = selectedMember
+    ? allTasks.filter(t => t.assignee === selectedMember.name && (showArchived ? t.archived : !t.archived))
+    : [];
+
+  return (
+    <>
+      {/* Затемнение */}
+      {open && (
+        <div
+          onClick={onClose}
+          style={{
+            position: "fixed", inset: 0, background: "#00000066",
+            zIndex: 90, backdropFilter: "blur(2px)",
+          }}
+        />
+      )}
+
+      {/* Панель */}
+      <div style={{
+        position: "fixed", top: 0, right: 0, bottom: 0,
+        width: 420,
+        background: "#0a0a0a",
+        borderLeft: "1px solid #ffffff0f",
+        zIndex: 100,
+        transform: open ? "translateX(0)" : "translateX(100%)",
+        transition: "transform 0.3s ease",
+        display: "flex",
+        flexDirection: "column",
+        overflowY: "auto",
+      }}>
+        {/* Шапка панели */}
+        <div style={{
+          padding: "20px 24px",
+          borderBottom: "1px solid #ffffff0a",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          position: "sticky", top: 0, background: "#0a0a0a", zIndex: 10,
+        }}>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>
+            {selectedMember ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <button
+                  onClick={() => setSelectedMember(null)}
+                  style={{ background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: 18 }}
+                >←</button>
+                <img src={selectedMember.avatar} alt={selectedMember.name} style={{
+                  width: 28, height: 28, borderRadius: "50%", objectFit: "cover",
+                  border: `2px solid ${selectedMember.color}`,
+                }} />
+                {selectedMember.name}
+              </div>
+            ) : "👥 Команда"}
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: "#ffffff11", border: "none", color: "#fff", width: 28, height: 28, borderRadius: 6, cursor: "pointer" }}
+          >✕</button>
+        </div>
+
+        <div style={{ padding: 20, flex: 1 }}>
+          {!selectedMember ? (
+            // Список сотрудников
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {memberStats.map(({ member, done, active, overdue, total, rate }) => (
+                <div
+                  key={member.username}
+                  onClick={() => setSelectedMember(member)}
+                  style={{
+                    background: member.bg,
+                    border: `1px solid ${member.color}33`,
+                    borderRadius: 12, padding: 16, cursor: "pointer",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.border = `1px solid ${member.color}88`}
+                  onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.border = `1px solid ${member.color}33`}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                    <img src={member.avatar} alt={member.name} style={{
+                      width: 40, height: 40, borderRadius: "50%", objectFit: "cover",
+                      border: `2px solid ${member.color}`,
+                    }} />
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{member.name}</div>
+                      <div style={{ fontSize: 11, color: member.color }}>{member.role}</div>
+                    </div>
+                    <div style={{ marginLeft: "auto", fontSize: 20, fontWeight: 800, color: member.color }}>{rate}%</div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    {[
+                      { label: "Активных", value: active, color: member.color },
+                      { label: "Готово", value: done, color: "#00C896" },
+                      { label: "Просрочено", value: overdue, color: overdue > 0 ? "#FF4444" : "#444" },
+                    ].map(s => (
+                      <div key={s.label} style={{
+                        flex: 1, background: "#ffffff08", borderRadius: 8,
+                        padding: "6px 4px", textAlign: "center",
+                      }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: s.color }}>{s.value}</div>
+                        <div style={{ fontSize: 9, color: "#666" }}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <StatBar value={done} max={total || 1} color={member.color} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            // Детальная карточка сотрудника
+            <div>
+              {selected && (
+                <>
+                  {/* Статистика */}
+                  <div style={{
+                    background: selectedMember.bg,
+                    border: `1px solid ${selectedMember.color}33`,
+                    borderRadius: 12, padding: 16, marginBottom: 16,
+                  }}>
+                    <div style={{ fontSize: 12, color: selectedMember.color, marginBottom: 8 }}>{selectedMember.subrole}</div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                      {[
+                        { label: "Активных", value: selected.active, color: selectedMember.color },
+                        { label: "Выполнено", value: selected.done, color: "#00C896" },
+                        { label: "Просрочено", value: selected.overdue, color: selected.overdue > 0 ? "#FF4444" : "#555" },
+                        { label: "В архиве", value: selected.archived, color: "#888" },
+                      ].map(s => (
+                        <div key={s.label} style={{
+                          background: "#ffffff08", borderRadius: 8, padding: "10px 12px",
+                          display: "flex", justifyContent: "space-between", alignItems: "center",
+                        }}>
+                          <span style={{ fontSize: 11, color: "#888" }}>{s.label}</span>
+                          <span style={{ fontSize: 18, fontWeight: 800, color: s.color }}>{s.value}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ fontSize: 11, color: "#888" }}>Эффективность</span>
+                      <span style={{ fontSize: 11, color: selectedMember.color, fontWeight: 700 }}>{selected.rate}%</span>
+                    </div>
+                    <StatBar value={selected.done} max={(selected.total + selected.archived) || 1} color={selectedMember.color} />
+                  </div>
+
+                  {/* Переключатель архив/активные */}
+                  <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                    {[
+                      { label: "Активные", value: false },
+                      { label: "Архив", value: true },
+                    ].map(tab => (
+                      <button
+                        key={String(tab.value)}
+                        onClick={() => setShowArchived(tab.value)}
+                        style={{
+                          flex: 1, padding: "8px", borderRadius: 8, cursor: "pointer",
+                          background: showArchived === tab.value ? selectedMember.color + "22" : "#ffffff08",
+                          border: showArchived === tab.value ? `1px solid ${selectedMember.color}66` : "1px solid #ffffff11",
+                          color: showArchived === tab.value ? selectedMember.color : "#888",
+                          fontSize: 13, fontWeight: 600,
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Список задач */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {memberTasks.length === 0 && (
+                      <div style={{ color: "#444", textAlign: "center", padding: 32 }}>Нет задач</div>
+                    )}
+                    {memberTasks.map(task => {
+                      const statusColors: Record<string, string> = {
+                        "новая": "#3B82F6", "в работе": "#F59E0B",
+                        "выполнена": "#10B981", "просрочена": "#EF4444",
+                      };
+                      const statusEmoji: Record<string, string> = {
+                        "новая": "🆕", "в работе": "🔄", "выполнена": "✅", "просрочена": "🔴",
+                      };
+                      const color = statusColors[task.status] ?? "#888";
+                      return (
+                        <div key={task.id} style={{
+                          background: "#141414",
+                          border: `1px solid ${color}22`,
+                          borderLeft: `3px solid ${color}`,
+                          borderRadius: 8, padding: "10px 12px",
+                        }}>
+                          <div style={{ fontSize: 12, color: "#fff", marginBottom: 4, lineHeight: 1.4 }}>
+                            <span style={{ color: "#555", fontSize: 10 }}>#{task.id}</span> {task.title}
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontSize: 10, color: "#666" }}>
+                              📅 {task.deadline ? new Date(task.deadline).toLocaleDateString("ru-RU") : "без срока"}
+                            </span>
+                            <span style={{ fontSize: 10, color }}>
+                              {statusEmoji[task.status]} {task.status}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [closing, setClosing] = useState(false);
   const [filter, setFilter] = useState("");
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [time, setTime] = useState(new Date());
 
   useEffect(() => {
@@ -92,9 +342,12 @@ export default function TasksPage() {
   }, []);
 
   async function fetchTasks() {
-    const res = await fetch("/api/tasks");
-    const data = await res.json();
-    setTasks(data.tasks ?? []);
+    const [active, archived] = await Promise.all([
+      fetch("/api/tasks").then(r => r.json()),
+      fetch("/api/tasks?archived=true").then(r => r.json()),
+    ]);
+    setTasks(active.tasks ?? []);
+    setAllTasks([...(active.tasks ?? []), ...(archived.tasks ?? [])]);
     setLoading(false);
   }
 
@@ -169,6 +422,36 @@ export default function TasksPage() {
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
       `}</style>
 
+      {/* Кнопка открытия панели */}
+      <button
+        onClick={() => setPanelOpen(true)}
+        style={{
+          position: "fixed", right: panelOpen ? 420 : 0, top: "50%",
+          transform: "translateY(-50%)",
+          background: "#1a1a1a", border: "1px solid #333",
+          borderRight: "none", borderRadius: "8px 0 0 8px",
+          color: "#888", padding: "16px 8px",
+          cursor: "pointer", zIndex: 95,
+          transition: "right 0.3s ease",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+          fontSize: 10,
+        }}
+        onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = "#fff"}
+        onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = "#888"}
+      >
+        <span style={{ fontSize: 16 }}>👥</span>
+        <span style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>Команда</span>
+        <span>←</span>
+      </button>
+
+      {/* Боковая панель */}
+      <SidePanel
+        open={panelOpen}
+        onClose={() => setPanelOpen(false)}
+        tasks={tasks}
+        allTasks={allTasks}
+      />
+
       {/* Шапка */}
       <div style={{
         padding: "24px 40px", borderBottom: "1px solid #ffffff0a",
@@ -214,14 +497,11 @@ export default function TasksPage() {
               fontSize: 13, color: selectedMember === null ? "#fff" : "#666",
               transition: "all 0.2s",
             }}
-          >
-            Все
-          </div>
+          >Все</div>
           {TEAM.map(member => {
             const memberTasks = tasks.filter(t => t.assignee === member.name);
             const active = memberTasks.filter(t => t.status !== "выполнена").length;
             const isSelected = selectedMember === member.name;
-
             return (
               <div
                 key={member.username}
@@ -243,25 +523,17 @@ export default function TasksPage() {
                       opacity: 0.5, animation: `pulse 2s ease-out infinite`,
                     }} />
                   )}
-                  <img
-                    src={member.avatar}
-                    alt={member.name}
-                    style={{
-                      position: "absolute", inset: isSelected ? 4 : 0,
-                      borderRadius: "50%", width: isSelected ? "calc(100% - 8px)" : "100%",
-                      height: isSelected ? "calc(100% - 8px)" : "100%",
-                      objectFit: "cover",
-                      border: `2px solid ${isSelected ? member.color : "#ffffff22"}`,
-                    }}
-                  />
+                  <img src={member.avatar} alt={member.name} style={{
+                    position: "absolute", inset: isSelected ? 4 : 0,
+                    borderRadius: "50%", width: isSelected ? "calc(100% - 8px)" : "100%",
+                    height: isSelected ? "calc(100% - 8px)" : "100%",
+                    objectFit: "cover",
+                    border: `2px solid ${isSelected ? member.color : "#ffffff22"}`,
+                  }} />
                 </div>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: isSelected ? "#fff" : "#aaa" }}>
-                    {member.name}
-                  </div>
-                  <div style={{ fontSize: 10, color: isSelected ? member.color : "#555" }}>
-                    {active} активных
-                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: isSelected ? "#fff" : "#aaa" }}>{member.name}</div>
+                  <div style={{ fontSize: 10, color: isSelected ? member.color : "#555" }}>{active} активных</div>
                 </div>
               </div>
             );
@@ -286,28 +558,19 @@ export default function TasksPage() {
             background: "#ffffff08", border: "1px solid #ffffff11",
             borderRadius: 8, padding: "8px 14px", color: "#888",
             fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-            transition: "all 0.2s",
           }}
-          onMouseEnter={e => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#fff";
-            (e.currentTarget as HTMLButtonElement).style.background = "#ffffff14";
-          }}
-          onMouseLeave={e => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#888";
-            (e.currentTarget as HTMLButtonElement).style.background = "#ffffff08";
-          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = "#fff"; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = "#888"; }}
         >
           <span style={{ display: "inline-block", animation: refreshing ? "spin 0.6s linear" : "none" }}>🔄</span>
           {refreshing ? "Обновляю..." : "Обновить"}
         </button>
-
         <button
           onClick={handleCloseWeek}
           style={{
             background: "#00C89611", border: "1px solid #00C89633",
             borderRadius: 8, padding: "8px 14px", color: "#00C896",
             fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-            transition: "all 0.2s",
           }}
           onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = "#00C89622"}
           onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = "#00C89611"}
@@ -322,7 +585,6 @@ export default function TasksPage() {
           const colTasks = filtered.filter(t =>
             col.key === "просрочена" ? isOverdue(t) : t.status === col.key && !isOverdue(t)
           );
-
           return (
             <div key={col.key} style={{ background: "#111", borderRadius: 12, overflow: "hidden" }}>
               <div style={{
@@ -336,7 +598,6 @@ export default function TasksPage() {
                   borderRadius: 12, padding: "2px 8px", fontSize: 12, fontWeight: 700,
                 }}>{colTasks.length}</span>
               </div>
-
               <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, minHeight: 200 }}>
                 {colTasks.length === 0 && (
                   <div style={{ color: "#333", fontSize: 13, textAlign: "center", marginTop: 32 }}>Нет задач</div>
@@ -352,7 +613,6 @@ export default function TasksPage() {
                       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, lineHeight: 1.4 }}>
                         <span style={{ color: "#555", fontSize: 11 }}>#{task.id}</span> {task.title}
                       </div>
-
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                         {member && (
                           <img src={member.avatar} alt={member.name} style={{
@@ -360,15 +620,11 @@ export default function TasksPage() {
                             border: `1px solid ${member.color}`,
                           }} />
                         )}
-                        <span style={{ fontSize: 12, color: member ? member.color : "#888" }}>
-                          {task.assignee}
-                        </span>
+                        <span style={{ fontSize: 12, color: member ? member.color : "#888" }}>{task.assignee}</span>
                       </div>
-
                       <div style={{ fontSize: 11, color: isOverdue(task) ? "#EF4444" : "#666", marginBottom: 8 }}>
                         📅 {formatDate(task.deadline)}
                       </div>
-
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                         {STATUS_COLUMNS.filter(s => s.key !== col.key && s.key !== "просрочена").map(s => (
                           <button
