@@ -79,6 +79,7 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [filter, setFilter] = useState("");
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [time, setTime] = useState(new Date());
@@ -101,6 +102,14 @@ export default function TasksPage() {
     setRefreshing(true);
     await fetchTasks();
     setTimeout(() => setRefreshing(false), 600);
+  }
+
+  async function handleCloseWeek() {
+    if (!confirm("Закрыть неделю? Все выполненные задачи уйдут в архив.")) return;
+    setClosing(true);
+    await fetch("/api/tasks?action=close-week", { method: "DELETE" });
+    await fetchTasks();
+    setClosing(false);
   }
 
   async function updateStatus(id: number, status: string) {
@@ -260,7 +269,7 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Поиск + кнопка обновления */}
+      {/* Поиск + кнопки */}
       <div style={{ padding: "16px 40px", display: "flex", gap: 12, alignItems: "center" }}>
         <input
           placeholder="Поиск по задаче..."
@@ -290,6 +299,20 @@ export default function TasksPage() {
         >
           <span style={{ display: "inline-block", animation: refreshing ? "spin 0.6s linear" : "none" }}>🔄</span>
           {refreshing ? "Обновляю..." : "Обновить"}
+        </button>
+
+        <button
+          onClick={handleCloseWeek}
+          style={{
+            background: "#00C89611", border: "1px solid #00C89633",
+            borderRadius: 8, padding: "8px 14px", color: "#00C896",
+            fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = "#00C89622"}
+          onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = "#00C89611"}
+        >
+          {closing ? "⏳ Закрываю..." : "✅ Закрыть неделю"}
         </button>
       </div>
 
