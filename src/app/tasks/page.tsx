@@ -182,6 +182,7 @@ export default function TasksPage() {
   const [activeCol, setActiveCol] = useState<string>("новая");
   const [dragTaskId, setDragTaskId] = useState<number | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+  const [editingDeadline, setEditingDeadline] = useState<number | null>(null);
 
   useEffect(() => {
     fetchTasks();
@@ -226,29 +227,24 @@ export default function TasksPage() {
     fetchTasks();
   }
 
-  // Drag & Drop handlers
-  function handleDragStart(taskId: number) {
-    setDragTaskId(taskId);
+  async function updateDeadline(id: number, deadline: string) {
+    await fetch("/api/tasks", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, deadline }),
+    });
+    setEditingDeadline(null);
+    fetchTasks();
   }
 
-  function handleDragOver(e: React.DragEvent, colKey: string) {
-    e.preventDefault();
-    setDragOverCol(colKey);
-  }
-
+  function handleDragStart(taskId: number) { setDragTaskId(taskId); }
+  function handleDragOver(e: React.DragEvent, colKey: string) { e.preventDefault(); setDragOverCol(colKey); }
   function handleDrop(e: React.DragEvent, colKey: string) {
     e.preventDefault();
-    if (dragTaskId !== null && colKey !== "просрочена") {
-      updateStatus(dragTaskId, colKey);
-    }
-    setDragTaskId(null);
-    setDragOverCol(null);
+    if (dragTaskId !== null && colKey !== "просрочена") updateStatus(dragTaskId, colKey);
+    setDragTaskId(null); setDragOverCol(null);
   }
-
-  function handleDragEnd() {
-    setDragTaskId(null);
-    setDragOverCol(null);
-  }
+  function handleDragEnd() { setDragTaskId(null); setDragOverCol(null); }
 
   function isOverdue(task: Task) {
     if (!task.deadline) return false;
@@ -262,9 +258,7 @@ export default function TasksPage() {
   }
 
   const filtered = tasks.filter(t => {
-    const matchFilter = filter === "" ||
-      t.assignee.toLowerCase().includes(filter.toLowerCase()) ||
-      t.title.toLowerCase().includes(filter.toLowerCase());
+    const matchFilter = filter === "" || t.assignee.toLowerCase().includes(filter.toLowerCase()) || t.title.toLowerCase().includes(filter.toLowerCase());
     const matchMember = selectedMember === null || t.assignee === selectedMember;
     return matchFilter && matchMember;
   });
@@ -274,13 +268,7 @@ export default function TasksPage() {
   const overdueTasks = tasks.filter(t => isOverdue(t)).length;
   const activeTasks = tasks.filter(t => t.status !== "выполнена").length;
 
-  if (loading) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#060606", color: "#fff" }}>
-        Загрузка...
-      </div>
-    );
-  }
+  if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#060606", color: "#fff" }}>Загрузка...</div>;
 
   return (
     <div style={{ minHeight: "100vh", background: "#060606", color: "#fff", fontFamily: "'SF Pro Display', -apple-system, sans-serif" }}>
@@ -288,10 +276,12 @@ export default function TasksPage() {
         @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(2.5); opacity: 0; } }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .task-card { cursor: grab; } .task-card:active { cursor: grabbing; }
-        .task-card[draggable]:hover { opacity: 0.9; }
+        .deadline-btn { cursor: pointer; transition: all 0.15s; }
+        .deadline-btn:hover { color: #fff !important; background: #ffffff11 !important; border-radius: 4px; }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: #111; }
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
       `}</style>
 
       <button onClick={() => setPanelOpen(true)} style={{ position: "fixed", right: 0, top: "50%", transform: "translateY(-50%)", background: "#1a1a1a", border: "1px solid #333", borderRight: "none", borderRadius: "8px 0 0 8px", color: "#888", padding: isMobile ? "12px 6px" : "16px 8px", cursor: "pointer", zIndex: 95, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, fontSize: 10 }}>
@@ -354,7 +344,7 @@ export default function TasksPage() {
         <button onClick={handleCloseWeek} style={{ background: "#00C89611", border: "1px solid #00C89633", borderRadius: 8, padding: "7px 12px", color: "#00C896", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
           {closing ? "⏳" : "✅"} {closing ? "Закрываю..." : "Закрыть неделю"}
         </button>
-        {!isMobile && <div style={{ fontSize: 11, color: "#444", marginLeft: 4 }}>← перетащи карточку в другую колонку</div>}
+        {!isMobile && <div style={{ fontSize: 11, color: "#444", marginLeft: 4 }}>← перетащи карточку · нажми на дату чтобы изменить</div>}
       </div>
 
       {/* Мобильный переключатель */}
@@ -371,22 +361,10 @@ export default function TasksPage() {
       {/* Доска задач */}
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)", gap: 12, paddingLeft: isMobile ? 12 : 40, paddingRight: isMobile ? 12 : 40, paddingBottom: isMobile ? 80 : 40 }}>
         {STATUS_COLUMNS.filter(col => !isMobile || col.key === activeCol).map(col => {
-          const colTasks = filtered.filter(t =>
-            col.key === "просрочена" ? isOverdue(t) : t.status === col.key && !isOverdue(t)
-          );
+          const colTasks = filtered.filter(t => col.key === "просрочена" ? isOverdue(t) : t.status === col.key && !isOverdue(t));
           const isDragTarget = dragOverCol === col.key && col.key !== "просрочена";
           return (
-            <div
-              key={col.key}
-              onDragOver={e => handleDragOver(e, col.key)}
-              onDrop={e => handleDrop(e, col.key)}
-              style={{
-                background: isDragTarget ? col.color + "11" : "#111",
-                borderRadius: 12, overflow: "hidden",
-                border: isDragTarget ? `2px dashed ${col.color}66` : "2px solid transparent",
-                transition: "all 0.15s ease",
-              }}
-            >
+            <div key={col.key} onDragOver={e => handleDragOver(e, col.key)} onDrop={e => handleDrop(e, col.key)} style={{ background: isDragTarget ? col.color + "11" : "#111", borderRadius: 12, overflow: "hidden", border: isDragTarget ? `2px dashed ${col.color}66` : "2px solid transparent", transition: "all 0.15s ease" }}>
               {!isMobile && (
                 <div style={{ padding: "10px 14px", borderBottom: `2px solid ${col.color}`, display: "flex", alignItems: "center", gap: 8 }}>
                   <span>{col.emoji}</span>
@@ -395,31 +373,13 @@ export default function TasksPage() {
                 </div>
               )}
               <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8, minHeight: isMobile ? "auto" : 200 }}>
-                {colTasks.length === 0 && (
-                  <div style={{ color: isDragTarget ? col.color + "88" : "#333", fontSize: 12, textAlign: "center", marginTop: 24, transition: "color 0.15s" }}>
-                    {isDragTarget ? "Отпусти здесь" : "Нет задач"}
-                  </div>
-                )}
+                {colTasks.length === 0 && <div style={{ color: isDragTarget ? col.color + "88" : "#333", fontSize: 12, textAlign: "center", marginTop: 24 }}>{isDragTarget ? "Отпусти здесь" : "Нет задач"}</div>}
                 {colTasks.map(task => {
                   const member = TEAM.find(m => m.name === task.assignee);
                   const isDragging = dragTaskId === task.id;
+                  const isEditingThis = editingDeadline === task.id;
                   return (
-                    <div
-                      key={task.id}
-                      className="task-card"
-                      draggable
-                      onDragStart={() => handleDragStart(task.id)}
-                      onDragEnd={handleDragEnd}
-                      style={{
-                        background: "#1a1a1a", borderRadius: 8, padding: 12,
-                        border: `1px solid ${isOverdue(task) ? "#EF444433" : member ? member.color + "22" : "#333"}`,
-                        borderLeft: `3px solid ${member ? member.color : "#444"}`,
-                        opacity: isDragging ? 0.4 : 1,
-                        transform: isDragging ? "scale(0.98)" : "scale(1)",
-                        transition: "opacity 0.15s, transform 0.15s",
-                        userSelect: "none",
-                      }}
-                    >
+                    <div key={task.id} className="task-card" draggable onDragStart={() => handleDragStart(task.id)} onDragEnd={handleDragEnd} style={{ background: "#1a1a1a", borderRadius: 8, padding: 12, border: `1px solid ${isOverdue(task) ? "#EF444433" : member ? member.color + "22" : "#333"}`, borderLeft: `3px solid ${member ? member.color : "#444"}`, opacity: isDragging ? 0.4 : 1, transform: isDragging ? "scale(0.98)" : "scale(1)", transition: "opacity 0.15s, transform 0.15s", userSelect: "none" }}>
                       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, lineHeight: 1.4 }}>
                         <span style={{ color: "#555", fontSize: 10 }}>#{task.id}</span> {task.title}
                       </div>
@@ -427,9 +387,33 @@ export default function TasksPage() {
                         {member && <img src={member.avatar} alt={member.name} style={{ width: 18, height: 18, borderRadius: "50%", objectFit: "cover", border: `1px solid ${member.color}` }} />}
                         <span style={{ fontSize: 11, color: member ? member.color : "#888" }}>{task.assignee}</span>
                       </div>
-                      <div style={{ fontSize: 10, color: isOverdue(task) ? "#EF4444" : "#666", marginBottom: 8 }}>
-                        📅 {formatDate(task.deadline)}
+
+                      {/* Дедлайн с редактированием */}
+                      <div style={{ marginBottom: 8 }}>
+                        {isEditingThis ? (
+                          <div style={{ display: "flex", gap: 4, alignItems: "center" }} onClick={e => e.stopPropagation()}>
+                            <input
+                              type="date"
+                              defaultValue={task.deadline ?? ""}
+                              autoFocus
+                              onBlur={e => { if (e.target.value) updateDeadline(task.id, e.target.value); else setEditingDeadline(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") { const v = (e.target as HTMLInputElement).value; if (v) updateDeadline(task.id, v); else setEditingDeadline(null); } if (e.key === "Escape") setEditingDeadline(null); }}
+                              style={{ background: "#2a2a2a", border: "1px solid #444", borderRadius: 4, color: "#fff", fontSize: 11, padding: "2px 6px", outline: "none", flex: 1 }}
+                            />
+                            <button onClick={() => setEditingDeadline(null)} style={{ background: "none", border: "none", color: "#666", cursor: "pointer", fontSize: 12 }}>✕</button>
+                          </div>
+                        ) : (
+                          <div
+                            className="deadline-btn"
+                            onClick={e => { e.stopPropagation(); setEditingDeadline(task.id); }}
+                            style={{ fontSize: 10, color: isOverdue(task) ? "#EF4444" : "#666", padding: "2px 4px", display: "inline-flex", alignItems: "center", gap: 4 }}
+                          >
+                            📅 {formatDate(task.deadline)}
+                            <span style={{ fontSize: 9, color: "#444" }}>✏️</span>
+                          </div>
+                        )}
                       </div>
+
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                         {STATUS_COLUMNS.filter(s => s.key !== col.key && s.key !== "просрочена").map(s => (
                           <button key={s.key} onClick={() => updateStatus(task.id, s.key)} style={{ background: s.color + "22", color: s.color, border: `1px solid ${s.color}44`, borderRadius: 6, padding: "2px 8px", fontSize: 11, cursor: "pointer" }}>{s.emoji} {s.label}</button>
