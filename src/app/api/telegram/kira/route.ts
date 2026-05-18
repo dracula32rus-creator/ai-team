@@ -60,7 +60,8 @@ function parseTaskList(text: string): { title: string; deadline: string | null; 
   const tasks = [];
 
   for (const line of lines) {
-    const match = line.match(/^\d+[.)]\s+(.+)/);
+    // Поддержка: "1. задача", "1) задача", "- задача", "• задача", "– задача", "— задача"
+    const match = line.match(/^(?:\d+[.)]\s+|[-•–—]\s+)(.+)/);
     if (match) {
       const raw = match[1];
       const done = raw.includes("✅") || raw.includes("☑");
@@ -83,7 +84,6 @@ function formatTask(task: Record<string, string | number>) {
 }
 
 function parseManualTask(text: string) {
-  // Ищем всех исполнителей: "для @вася и @петя" или "для @вася, @петя"
   const assigneeMatches = [...text.matchAll(/для\s+@?(\w+)/gi)];
   const additionalMatches = [...text.matchAll(/[,и]\s*@(\w+)/gi)];
 
@@ -106,7 +106,6 @@ export async function POST(req: NextRequest) {
   const update = await req.json();
   const token = process.env.TELEGRAM_TOKEN_KIRA!;
 
-  // Обработка отредактированных сообщений (галочки)
   if (update.edited_message) {
     const msg = update.edited_message;
     const text = msg.text ?? "";
@@ -142,7 +141,7 @@ export async function POST(req: NextRequest) {
   const mentionedKira = text.toLowerCase().includes("@kira_wb_ozon_bot");
   const replied = message.reply_to_message?.from?.is_bot;
 
-  // Автоматический парсинг нумерованного списка (без тега Киры)
+  // Автоматический парсинг списка задач (без тега Киры)
   const taskList = parseTaskList(text);
   if (taskList.length >= 2 && !mentionedKira) {
     let created = 0;
@@ -174,7 +173,6 @@ export async function POST(req: NextRequest) {
   const cleanText = text.replace(/@kira_wb_ozon_bot/gi, "").trim();
   const t = cleanText.toLowerCase();
 
-  // Все задачи
   if (t.match(/все задачи|покажи задачи|список задач/)) {
     const { data } = await supabase.from("tasks").select("*").order("deadline", { ascending: true });
     if (!data?.length) {
@@ -195,7 +193,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // Задачи конкретного человека
   const whoMatch = cleanText.match(/задачи\s+@?(\w+)/i);
   if (whoMatch) {
     const name = getMemberName(whoMatch[1]) || whoMatch[1];
@@ -211,7 +208,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // Выполнить задачу
   const doneMatch = cleanText.match(/задача\s+#?(\d+)\s+выполнена/i) ?? cleanText.match(/выполнена\s+#?(\d+)/i);
   if (doneMatch) {
     const { data } = await supabase.from("tasks")
@@ -221,7 +217,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // Сдвинуть дедлайн
   const shiftMatch = cleanText.match(/задача\s+#?(\d+).*?до\s+(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{2,4}))?/i);
   if (shiftMatch) {
     const day = shiftMatch[2].padStart(2, "0");
@@ -235,7 +230,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // В работе
   const wipMatch = cleanText.match(/задача\s+#?(\d+)\s+в работе/i);
   if (wipMatch) {
     const { data } = await supabase.from("tasks")
@@ -245,7 +239,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // Создать задачу вручную — поддержка нескольких исполнителей
   if (t.match(/задача|задание/) && t.match(/для/)) {
     const parsed = parseManualTask(cleanText);
 
@@ -289,10 +282,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // Помощь
   await sendMessage(token, chatId, `🤖 *Кира — менеджер задач*
 
-*Автоматически* фиксирую нумерованные списки задач в чате.
+*Автоматически* фиксирую списки задач в чате (нумерованные и через тире).
 
 *Создать одному:*
 задача для @вася: сделать карточку до 25.05
