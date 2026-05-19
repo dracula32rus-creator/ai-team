@@ -33,11 +33,9 @@ function extractExpenseData(text: string) {
 
   let amount = parseFloat(amountMatch[1].replace(/[\s,]/g, ""));
   const suffix = amountMatch[2]?.toLowerCase() ?? "";
-
   if (suffix === "кк" || suffix === "kk") amount *= 1_000_000;
   else if (suffix === "к" || suffix === "k" || suffix === "т" || suffix === "t") amount *= 1_000;
   else if (suffix === "м" || suffix === "m") amount *= 1_000_000;
-
   if (isNaN(amount) || amount <= 0) return null;
 
   return {
@@ -57,8 +55,7 @@ function detectPlatform(text: string): string {
 }
 
 async function searchProducts(query: string, platform: string) {
-  const baseUrl = "https://ai-team-42mz.vercel.app";
-  const res = await fetch(`${baseUrl}/api/search`, {
+  const res = await fetch("https://ai-team-42mz.vercel.app/api/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, platform }),
@@ -90,36 +87,19 @@ function extractPeriod(text: string): { from: string; to: string } {
     if (t.includes(key)) {
       const from = new Date(year, month, 1);
       const to = new Date(year, month + 1, 0);
-      return {
-        from: from.toISOString().split("T")[0],
-        to: to.toISOString().split("T")[0],
-      };
+      return { from: from.toISOString().split("T")[0], to: to.toISOString().split("T")[0] };
     }
   }
 
-  if (t.includes("сегодня")) {
-    const today = now.toISOString().split("T")[0];
-    return { from: today, to: today };
-  }
-  if (t.match(/вчера/)) {
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const d = yesterday.toISOString().split("T")[0];
-    return { from: d, to: d };
-  }
-  if (t.match(/недел/)) {
-    const weekAgo = new Date(now);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    return { from: weekAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
-  }
-  const monthAgo = new Date(now);
-  monthAgo.setDate(monthAgo.getDate() - 30);
-  return { from: monthAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
+  if (t.includes("сегодня")) { const today = now.toISOString().split("T")[0]; return { from: today, to: today }; }
+  if (t.match(/вчера/)) { const y = new Date(now); y.setDate(y.getDate() - 1); const d = y.toISOString().split("T")[0]; return { from: d, to: d }; }
+  if (t.match(/недел/)) { const w = new Date(now); w.setDate(w.getDate() - 7); return { from: w.toISOString().split("T")[0], to: now.toISOString().split("T")[0] }; }
+  const m = new Date(now); m.setDate(m.getDate() - 30);
+  return { from: m.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
 }
 
 async function getOzonReport(dateFrom: string, dateTo: string) {
-  const baseUrl = "https://ai-team-42mz.vercel.app";
-  const res = await fetch(`${baseUrl}/api/ozon/report`, {
+  const res = await fetch("https://ai-team-42mz.vercel.app/api/ozon/report", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ dateFrom, dateTo }),
@@ -127,11 +107,96 @@ async function getOzonReport(dateFrom: string, dateTo: string) {
   return await res.json();
 }
 
+async function getMpstatsData(query: string) {
+  const res = await fetch("https://ai-team-42mz.vercel.app/api/mpstats", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  return await res.json();
+}
+
+function formatMpstatsContext(data: Record<string, unknown>): string {
+  if (!data || data.error) return "";
+
+  const subject = data.subject as Record<string, unknown>;
+  const info = data.info as Record<string, unknown>;
+  const sellers = data.sellers as Record<string, unknown>[];
+  const brands = data.brands as Record<string, unknown>[];
+  const priceSegments = data.priceSegments as Record<string, unknown>[];
+  const trends = data.trends as Record<string, unknown>[];
+  const period = data.period as Record<string, string>;
+
+  let ctx = `\n\n[LIVE MPSTATS DATA — Ниша: "${subject?.name}" за период ${period?.d1} — ${period?.d2}]\n\n`;
+
+  // Основная инфа
+  if (info) {
+    ctx += `📊 ОСНОВНЫЕ ПОКАЗАТЕЛИ НИШИ:\n`;
+    ctx += `• Выручка: ${info.revenue ? Number(info.revenue).toLocaleString("ru-RU") : "—"} ₽\n`;
+    ctx += `• Продажи: ${info.sales ?? "—"} шт\n`;
+    ctx += `• Товаров в нише: ${info.items ?? "—"}\n`;
+    ctx += `• Продавцов: ${info.sellers_count ?? "—"}\n`;
+    ctx += `• Брендов: ${info.brands_count ?? "—"}\n`;
+    ctx += `• Средняя цена: ${info.avg_price ? Number(info.avg_price).toLocaleString("ru-RU") : "—"} ₽\n`;
+    ctx += `• Средняя выручка на товар: ${info.revenue_per_item ? Number(info.revenue_per_item).toLocaleString("ru-RU") : "—"} ₽\n\n`;
+  }
+
+  // Топ продавцов
+  if (sellers?.length) {
+    ctx += `🏆 ТОП-5 ПРОДАВЦОВ:\n`;
+    sellers.slice(0, 5).forEach((s, i) => {
+      ctx += `${i + 1}. ${s.name ?? s.seller} — выручка: ${s.revenue ? Number(s.revenue).toLocaleString("ru-RU") : "—"} ₽, продажи: ${s.sales ?? "—"} шт, доля: ${s.revenue_share ?? "—"}%\n`;
+    });
+
+    // Монополизация — доля топ-3
+    if (sellers.length >= 3) {
+      const top3Share = sellers.slice(0, 3).reduce((sum: number, s) => sum + (Number(s.revenue_share) || 0), 0);
+      ctx += `\n⚠️ МОНОПОЛИЗАЦИЯ: Топ-3 продавца занимают ${top3Share.toFixed(1)}% рынка`;
+      if (top3Share > 60) ctx += " — рынок ВЫСОКО монополизирован, сложно зайти";
+      else if (top3Share > 40) ctx += " — рынок умеренно монополизирован";
+      else ctx += " — рынок конкурентный, есть место для новых игроков";
+      ctx += "\n\n";
+    }
+  }
+
+  // Топ брендов
+  if (brands?.length) {
+    ctx += `🏷️ ТОП-5 БРЕНДОВ:\n`;
+    brands.slice(0, 5).forEach((b, i) => {
+      ctx += `${i + 1}. ${b.name ?? b.brand} — выручка: ${b.revenue ? Number(b.revenue).toLocaleString("ru-RU") : "—"} ₽, доля: ${b.revenue_share ?? "—"}%\n`;
+    });
+    ctx += "\n";
+  }
+
+  // Ценовая сегментация
+  if (priceSegments?.length) {
+    ctx += `💰 ЦЕНОВАЯ СЕГМЕНТАЦИЯ:\n`;
+    priceSegments.forEach((seg) => {
+      ctx += `• ${seg.price_from ?? seg.min_price}–${seg.price_to ?? seg.max_price} ₽: ${seg.items_count ?? seg.items} тов, выручка ${seg.revenue ? Number(seg.revenue).toLocaleString("ru-RU") : "—"} ₽, доля ${seg.revenue_share ?? "—"}%\n`;
+    });
+    ctx += "\n";
+  }
+
+  // Тренды
+  if (trends?.length) {
+    const first = trends[0] as Record<string, unknown>;
+    const last = trends[trends.length - 1] as Record<string, unknown>;
+    const revenueFirst = Number(first?.revenue ?? 0);
+    const revenueLast = Number(last?.revenue ?? 0);
+    const trendPct = revenueFirst > 0 ? (((revenueLast - revenueFirst) / revenueFirst) * 100).toFixed(1) : "—";
+    ctx += `📈 ТРЕНД: ${Number(trendPct) > 0 ? "↑ Растущая" : "↓ Падающая"} ниша (${trendPct}% за период)\n\n`;
+  }
+
+  ctx += `Используй эти РЕАЛЬНЫЕ данные из MPStats для анализа. Сделай структурированный отчёт с таблицами в markdown формате.`;
+
+  return ctx;
+}
+
 export async function POST(req: NextRequest) {
   const { messages, systemPrompt, agentId } = await req.json();
-
   let extraContext = "";
 
+  // Финн — Ozon отчёт
   if (agentId === "cfo-finn") {
     const lastUserMessage = messages[messages.length - 1]?.content ?? "";
     if (needsOzonReport(lastUserMessage)) {
@@ -148,7 +213,7 @@ export async function POST(req: NextRequest) {
 Заказов доставлено: ${report.summary.ordersCount}
 Возвратов: ${report.summary.returnsCount}
 
-Используй эти реальные цифры из Ozon API в своём ответе. Помни — это только маркетплейс, без учёта твоих внутренних расходов (зарплата, аренда, материалы и т.д.).`;
+Используй эти реальные цифры из Ozon API в своём ответе.`;
         }
       } catch (e) {
         console.error("Ozon report failed:", e);
@@ -156,10 +221,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Нова — MPStats анализ ниши
+  if (agentId === "buyer-nova") {
+    const lastUserMessage = messages[messages.length - 1]?.content ?? "";
+    try {
+      const mpstatsData = await getMpstatsData(lastUserMessage);
+      if (!mpstatsData.error) {
+        extraContext = formatMpstatsContext(mpstatsData);
+      }
+    } catch (e) {
+      console.error("MPStats failed:", e);
+    }
+  }
+
+  // Лин — поиск товаров
   if (agentId === "scout-lin") {
     const lastUserMessage = messages[messages.length - 1]?.content ?? "";
     const platform = detectPlatform(lastUserMessage);
-
     try {
       const results = await searchProducts(lastUserMessage, platform);
       if (results.length > 0) {
@@ -181,7 +259,7 @@ export async function POST(req: NextRequest) {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4.6",
-      max_tokens: 1500,
+      max_tokens: 2000,
       messages: [
         { role: "system", content: systemPrompt + extraContext },
         ...messages,
@@ -195,11 +273,9 @@ export async function POST(req: NextRequest) {
   if (agentId === "accountant-tanya") {
     const lastUserMessage = messages[messages.length - 1]?.content ?? "";
     const expense = extractExpenseData(lastUserMessage);
-
     if (expense) {
       try {
-        const baseUrl = "https://ai-team-42mz.vercel.app";
-        await fetch(`${baseUrl}/api/sheets`, {
+        await fetch("https://ai-team-42mz.vercel.app/api/sheets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(expense),
