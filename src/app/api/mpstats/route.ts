@@ -24,21 +24,31 @@ function detectMarket(query: string): "wb" | "oz" | "both" {
 }
 
 async function searchWbSubjects(keyword: string) {
+  const token = process.env.MPSTATS_TOKEN;
+  console.log("MPStats token exists:", !!token, "length:", token?.length);
+  
   const res = await fetch(`${WB_BASE}/subjects`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify({ keyword, startRow: 0, endRow: 8 }),
   });
-  if (!res.ok) {
-    console.error("WB subjects error:", res.status, await res.text());
+  
+  const text = await res.text();
+  console.log("MPStats WB subjects status:", res.status);
+  console.log("MPStats WB subjects response:", text.slice(0, 500));
+  
+  if (!res.ok) return [];
+  
+  try {
+    const data = JSON.parse(text);
+    return (data?.data ?? []).map((s: Record<string, unknown>) => ({
+      id: s.id,
+      name: s.name,
+      market: "wb",
+    }));
+  } catch {
     return [];
   }
-  const data = await res.json();
-  return (data?.data ?? []).map((s: Record<string, unknown>) => ({
-    id: s.id,
-    name: s.name,
-    market: "wb",
-  }));
 }
 
 async function searchOzNiches(keyword: string) {
