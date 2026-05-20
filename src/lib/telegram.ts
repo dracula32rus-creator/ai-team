@@ -1,4 +1,11 @@
 import { getAgent } from "@/config/agents";
+import {
+  searchWbSubjects,
+  searchOzNiches,
+  getWbNicheData,
+  getOzNicheData,
+  detectMarket,
+} from "@/lib/mpstats";
 
 interface TelegramPhoto {
   file_id: string;
@@ -61,31 +68,15 @@ function extractPeriod(text: string): { from: string; to: string } {
     if (t.includes(key)) {
       const from = new Date(year, month, 1);
       const to = new Date(year, month + 1, 0);
-      return {
-        from: from.toISOString().split("T")[0],
-        to: to.toISOString().split("T")[0],
-      };
+      return { from: from.toISOString().split("T")[0], to: to.toISOString().split("T")[0] };
     }
   }
 
-  if (t.includes("сегодня")) {
-    const today = now.toISOString().split("T")[0];
-    return { from: today, to: today };
-  }
-  if (t.match(/вчера/)) {
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const d = yesterday.toISOString().split("T")[0];
-    return { from: d, to: d };
-  }
-  if (t.match(/недел/)) {
-    const weekAgo = new Date(now);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    return { from: weekAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
-  }
-  const monthAgo = new Date(now);
-  monthAgo.setDate(monthAgo.getDate() - 30);
-  return { from: monthAgo.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
+  if (t.includes("сегодня")) { const today = now.toISOString().split("T")[0]; return { from: today, to: today }; }
+  if (t.match(/вчера/)) { const y = new Date(now); y.setDate(y.getDate() - 1); const d = y.toISOString().split("T")[0]; return { from: d, to: d }; }
+  if (t.match(/недел/)) { const w = new Date(now); w.setDate(w.getDate() - 7); return { from: w.toISOString().split("T")[0], to: now.toISOString().split("T")[0] }; }
+  const m = new Date(now); m.setDate(m.getDate() - 30);
+  return { from: m.toISOString().split("T")[0], to: now.toISOString().split("T")[0] };
 }
 
 async function getOzonReport(dateFrom: string, dateTo: string) {
@@ -97,38 +88,21 @@ async function getOzonReport(dateFrom: string, dateTo: string) {
   return await res.json();
 }
 
-async function sendOzonExcel(
-  botToken: string,
-  chatId: number,
-  dateFrom: string,
-  dateTo: string
-): Promise<boolean> {
+async function sendOzonExcel(botToken: string, chatId: number, dateFrom: string, dateTo: string): Promise<boolean> {
   try {
     const res = await fetch("https://ai-team-42mz.vercel.app/api/ozon/excel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dateFrom, dateTo }),
     });
-
     if (!res.ok) return false;
-
     const buffer = Buffer.from(await res.arrayBuffer());
     const fileName = `ozon-report-${dateFrom}-${dateTo}.xlsx`;
-
     const formData = new FormData();
     formData.append("chat_id", String(chatId));
     formData.append("caption", `📊 Отчёт Ozon: ${dateFrom} — ${dateTo}`);
-    formData.append(
-      "document",
-      new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-      fileName
-    );
-
-    const sendRes = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
-      method: "POST",
-      body: formData,
-    });
-
+    formData.append("document", new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), fileName);
+    const sendRes = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, { method: "POST", body: formData });
     return sendRes.ok;
   } catch (e) {
     console.error("Excel send error:", e);
@@ -142,11 +116,9 @@ async function getPhotoBase64(fileId: string, botToken: string): Promise<string 
     const fileData = await fileRes.json();
     const filePath = fileData.result?.file_path;
     if (!filePath) return null;
-
     const imageRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`);
     const arrayBuffer = await imageRes.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString("base64");
-    return base64;
+    return Buffer.from(arrayBuffer).toString("base64");
   } catch (e) {
     console.error("Photo download error:", e);
     return null;
@@ -157,31 +129,19 @@ async function describeImage(imageBase64: string): Promise<string> {
   try {
     const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-sonnet-4.6",
         max_tokens: 300,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image_url",
-                image_url: { url: `data:image/jpeg;base64,${imageBase64}` },
-              },
-              {
-                type: "text",
-                text: "Опиши товар на этой фотографии в 1-2 предложениях для поиска на маркетплейсе. Укажи тип товара, материал, цвет, ключевые особенности. Без лишних слов — только описание.",
-              },
-            ],
-          },
-        ],
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
+            { type: "text", text: "Опиши товар на этой фотографии в 1-2 предложениях для поиска на маркетплейсе. Укажи тип товара, материал, цвет, ключевые особенности. Без лишних слов — только описание." },
+          ],
+        }],
       }),
     });
-
     const data = await res.json();
     return data.choices?.[0]?.message?.content ?? "";
   } catch (e) {
@@ -190,17 +150,78 @@ async function describeImage(imageBase64: string): Promise<string> {
   }
 }
 
-export async function handleTelegramMessage(
-  update: TelegramUpdate,
-  agentId: string,
-  botToken: string
-) {
+function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: string): string {
+  const sellers = (data.sellers ?? []) as Record<string, unknown>[];
+  const brands = (data.brands ?? []) as Record<string, unknown>[];
+  const priceSegments = (data.priceSegments ?? []) as Record<string, unknown>[];
+  const trends = (data.trends ?? []) as Record<string, unknown>[];
+  const market = data.market as string;
+  const marketLabel = market === "wb" ? "Wildberries" : "Ozon";
+
+  const now = new Date();
+  const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+  const d2 = yesterday.toISOString().split("T")[0];
+  const d1 = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+  let ctx = `[LIVE MPSTATS DATA — ${marketLabel} — Ниша: "${subjectName}" за период ${d1} — ${d2}]\n\n`;
+
+  if (sellers?.length) {
+    ctx += `ТОП-5 ПРОДАВЦОВ (${marketLabel}):\n`;
+    const totalRev = sellers.reduce((sum, s) => sum + Number(s.revenue ?? 0), 0);
+    sellers.slice(0, 5).forEach((s, i) => {
+      const revenue = Number(s.revenue ?? 0);
+      const share = totalRev > 0 ? ((revenue / totalRev) * 100).toFixed(1) : "—";
+      ctx += `${i + 1}. ${s.name} — ${revenue.toLocaleString("ru-RU")} ₽ (${s.revenue_share ?? share}%)\n`;
+    });
+
+    if (sellers.length >= 3) {
+      const top3Rev = sellers.slice(0, 3).reduce((sum, s) => sum + Number(s.revenue ?? 0), 0);
+      const top3Share = totalRev > 0 ? ((top3Rev / totalRev) * 100).toFixed(1) : "0";
+      ctx += `\nМОНОПОЛИЗАЦИЯ: Топ-3 = ${top3Share}% рынка`;
+      if (Number(top3Share) > 60) ctx += " — ВЫСОКАЯ";
+      else if (Number(top3Share) > 40) ctx += " — СРЕДНЯЯ";
+      else ctx += " — НИЗКАЯ, можно заходить";
+      ctx += "\n\n";
+    }
+  }
+
+  if (brands?.length) {
+    ctx += `ТОП-5 БРЕНДОВ (${marketLabel}):\n`;
+    brands.slice(0, 5).forEach((b, i) => {
+      ctx += `${i + 1}. ${b.name} — ${b.revenue ? Number(b.revenue).toLocaleString("ru-RU") : "—"} ₽\n`;
+    });
+    ctx += "\n";
+  }
+
+  if (priceSegments?.length) {
+    ctx += `ЦЕНОВАЯ СЕГМЕНТАЦИЯ (${marketLabel}):\n`;
+    priceSegments.forEach((seg) => {
+      const from = seg.price_from ?? seg.min_range_price ?? "?";
+      const to = seg.price_to ?? seg.max_range_price ?? "?";
+      ctx += `• ${from}–${to} ₽: выручка ${seg.revenue ? Number(seg.revenue).toLocaleString("ru-RU") : "—"} ₽\n`;
+    });
+    ctx += "\n";
+  }
+
+  if (trends?.length) {
+    const first = trends[0] as Record<string, unknown>;
+    const last = trends[trends.length - 1] as Record<string, unknown>;
+    const r1 = Number(first?.revenue ?? 0);
+    const r2 = Number(last?.revenue ?? 0);
+    const pct = r1 > 0 ? (((r2 - r1) / r1) * 100).toFixed(1) : "—";
+    ctx += `ТРЕНД: ${Number(pct) > 0 ? "↑ Растущая" : "↓ Падающая"} ниша (${pct}% за период)\n\n`;
+  }
+
+  ctx += `Используй эти РЕАЛЬНЫЕ данные из MPStats. Сделай структурированный отчёт с таблицами. Дай итоговую оценку — заходить или нет, лучший ценовой сегмент.`;
+  return ctx;
+}
+
+export async function handleTelegramMessage(update: TelegramUpdate, agentId: string, botToken: string) {
   const message = update.message;
   if (!message) return;
 
   const userText = message.text ?? message.caption ?? "";
   const hasPhoto = message.photo && message.photo.length > 0;
-
   if (!userText && !hasPhoto) return;
 
   const chatId = message.chat.id;
@@ -210,15 +231,11 @@ export async function handleTelegramMessage(
   const botUsername = me.result?.username;
 
   const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
-
   if (isGroup && botUsername) {
     const mention = `@${botUsername}`.toLowerCase();
     const mentioned = userText.toLowerCase().includes(mention);
     const repliedToBot = message.reply_to_message?.from?.username === botUsername;
-
-    if (!mentioned && !repliedToBot) {
-      return;
-    }
+    if (!mentioned && !repliedToBot) return;
   }
 
   if (userText === "/start" || userText.startsWith("/start@")) {
@@ -228,10 +245,7 @@ export async function handleTelegramMessage(
   }
 
   const agent = getAgent(agentId);
-  if (!agent) {
-    await sendTelegramMessage(botToken, chatId, "Агент не найден");
-    return;
-  }
+  if (!agent) { await sendTelegramMessage(botToken, chatId, "Агент не найден"); return; }
 
   const cleanText = botUsername
     ? userText.replace(new RegExp(`@${botUsername}`, "gi"), "").trim()
@@ -248,16 +262,14 @@ export async function handleTelegramMessage(
     if (hasPhoto) {
       const largestPhoto = message.photo![message.photo!.length - 1];
       const base64 = await getPhotoBase64(largestPhoto.file_id, botToken);
-      if (base64) {
-        photoDescription = await describeImage(base64);
-      }
+      if (base64) photoDescription = await describeImage(base64);
     }
 
     const finalQuery = [photoDescription, cleanText].filter(Boolean).join(". ");
-
     let extraContext = "";
     let ozonReportPeriod: { from: string; to: string } | null = null;
 
+    // Финн — Ozon отчёт
     if (agentId === "cfo-finn" && needsOzonReport(finalQuery)) {
       try {
         const period = extractPeriod(finalQuery);
@@ -273,13 +285,68 @@ export async function handleTelegramMessage(
 Заказов доставлено: ${report.summary.ordersCount}
 Возвратов: ${report.summary.returnsCount}
 
-Используй эти реальные цифры из Ozon API в своём ответе. В конце обязательно напиши: "📎 Excel с детализацией отправлен отдельным файлом". Помни — это только маркетплейс, без учёта твоих внутренних расходов (зарплата, аренда, материалы и т.д.).`;
+Используй эти реальные цифры из Ozon API в своём ответе. В конце обязательно напиши: "📎 Excel с детализацией отправлен отдельным файлом".`;
+        }
+      } catch (e) { console.error("Ozon report failed:", e); }
+    }
+
+    // Нова — MPStats анализ ниши (сразу берём первый результат)
+    if (agentId === "buyer-nova" && finalQuery) {
+      try {
+        console.log("=== Nova TG: searching for:", finalQuery);
+        const market = detectMarket(finalQuery);
+        let subjects: { id: unknown; name: unknown; market: string }[] = [];
+
+        if (market === "wb") {
+          subjects = await searchWbSubjects(finalQuery);
+        } else if (market === "oz") {
+          subjects = await searchOzNiches(finalQuery);
+        } else {
+          const [wb, oz] = await Promise.all([
+            searchWbSubjects(finalQuery),
+            searchOzNiches(finalQuery),
+          ]);
+          subjects = [...wb.slice(0, 3), ...oz.slice(0, 3)];
+        }
+
+        console.log("=== Nova TG: found:", subjects.length, "subjects");
+
+        if (subjects.length > 0) {
+          // Берём первую найденную нишу и сразу анализируем
+          const first = subjects[0];
+          console.log("=== Nova TG: analyzing:", first.name, first.market);
+
+          const nicheData = first.market === "wb"
+            ? await getWbNicheData(Number(first.id))
+            : await getOzNicheData(Number(first.id));
+
+          extraContext = "\n\n" + formatMpstatsForTelegram(
+            { ...nicheData, market: first.market },
+            String(first.name)
+          );
+
+          // Если нашли в обоих маркетах — добавляем второй тоже
+          if (market === "both" && subjects.length > 1) {
+            const second = subjects.find(s => s.market !== first.market);
+            if (second) {
+              const secondData = second.market === "wb"
+                ? await getWbNicheData(Number(second.id))
+                : await getOzNicheData(Number(second.id));
+              extraContext += "\n\n" + formatMpstatsForTelegram(
+                { ...secondData, market: second.market },
+                String(second.name)
+              );
+            }
+          }
+        } else {
+          extraContext = `\n\n[MPStats не нашла нишу по запросу "${finalQuery}". Попроси уточнить — написать конкретное русское слово.]`;
         }
       } catch (e) {
-        console.error("Ozon report failed:", e);
+        console.error("Nova MPStats TG error:", e);
       }
     }
 
+    // Лин — поиск товаров
     if (agentId === "scout-lin" && finalQuery) {
       const platform = detectPlatform(finalQuery);
       try {
@@ -290,20 +357,13 @@ export async function handleTelegramMessage(
               `${i + 1}. ${r.title}\nURL: ${r.url}\nОписание: ${r.content?.slice(0, 200)}`
             ).join("\n\n");
         }
-        if (photoDescription) {
-          extraContext += `\n\n[Photo was analyzed as: ${photoDescription}]`;
-        }
-      } catch (e) {
-        console.error("Search failed:", e);
-      }
+        if (photoDescription) extraContext += `\n\n[Photo was analyzed as: ${photoDescription}]`;
+      } catch (e) { console.error("Search failed:", e); }
     }
 
     const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-sonnet-4.6",
         max_tokens: 1500,
@@ -327,14 +387,12 @@ export async function handleTelegramMessage(
       const expense = extractExpenseData(cleanText);
       if (expense) {
         try {
-          await fetch(`https://ai-team-42mz.vercel.app/api/sheets`, {
+          await fetch("https://ai-team-42mz.vercel.app/api/sheets", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(expense),
           });
-        } catch (e) {
-          console.error("Sheets error:", e);
-        }
+        } catch (e) { console.error("Sheets error:", e); }
       }
     }
 
@@ -348,11 +406,7 @@ async function sendTelegramMessage(token: string, chatId: number, text: string) 
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: "Markdown",
-    }),
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
   });
 }
 
@@ -365,9 +419,7 @@ function extractExpenseData(text: string) {
   if (dateMatch) {
     const day = dateMatch[1].padStart(2, "0");
     const month = dateMatch[2].padStart(2, "0");
-    const year = dateMatch[3]
-      ? (dateMatch[3].length === 2 ? `20${dateMatch[3]}` : dateMatch[3])
-      : new Date().getFullYear();
+    const year = dateMatch[3] ? (dateMatch[3].length === 2 ? `20${dateMatch[3]}` : dateMatch[3]) : new Date().getFullYear();
     date = `${day}.${month}.${year}`;
   } else {
     date = new Date().toLocaleDateString("ru-RU");
@@ -378,7 +430,6 @@ function extractExpenseData(text: string) {
   if (suffix === "кк" || suffix === "kk") amount *= 1_000_000;
   else if (suffix === "к" || suffix === "k" || suffix === "т" || suffix === "t") amount *= 1_000;
   else if (suffix === "м" || suffix === "m") amount *= 1_000_000;
-
   if (isNaN(amount) || amount <= 0) return null;
 
   const t = text.toLowerCase();
@@ -393,10 +444,5 @@ function extractExpenseData(text: string) {
   else if (t.match(/бартер/)) category = "бартеры";
   else if (t.match(/реклам|блогер|маркетинг/)) category = "реклама";
 
-  return {
-    date,
-    amount: String(Math.round(amount)),
-    category,
-    description: text,
-  };
+  return { date, amount: String(Math.round(amount)), category, description: text };
 }
