@@ -11,8 +11,11 @@ function getHeaders() {
 }
 
 function getDates() {
-  const d2 = new Date().toISOString().split("T")[0];
-  const d1 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const d2 = yesterday.toISOString().split("T")[0];
+  const d1 = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
   return { d1, d2 };
 }
 
@@ -25,18 +28,13 @@ function detectMarket(query: string): "wb" | "oz" | "both" {
 
 export async function searchWbSubjects(keyword: string) {
   console.log("=== MPStats WB search:", keyword);
-  console.log("Token:", process.env.MPSTATS_TOKEN?.slice(0, 8) + "...");
-
-  const res = await fetch(`${WB_BASE}/subjects`, {
+  const res = await fetch(`${WB_BASE}/subject/list`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify({ keyword, startRow: 0, endRow: 8 }),
   });
-
   const text = await res.text();
-  console.log("WB subjects status:", res.status);
-  console.log("WB subjects response:", text.slice(0, 300));
-
+  console.log("WB subject/list status:", res.status, text.slice(0, 200));
   if (!res.ok) return [];
   try {
     const data = JSON.parse(text);
@@ -48,17 +46,13 @@ export async function searchWbSubjects(keyword: string) {
 
 export async function searchOzNiches(keyword: string) {
   console.log("=== MPStats OZ search:", keyword);
-
   const res = await fetch(`${OZ_BASE}/niche/list?search=${encodeURIComponent(keyword)}&startRow=0&endRow=8`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify({}),
   });
-
   const text = await res.text();
-  console.log("OZ niches status:", res.status);
-  console.log("OZ niches response:", text.slice(0, 300));
-
+  console.log("OZ niche/list status:", res.status, text.slice(0, 200));
   if (!res.ok) return [];
   try {
     const data = JSON.parse(text);
@@ -71,71 +65,75 @@ export async function searchOzNiches(keyword: string) {
 export async function getWbNicheData(subjectId: number) {
   const { d1, d2 } = getDates();
   const h = getHeaders();
+  const base = `${WB_BASE}/subject`;
+  const q = `path=${subjectId}&d1=${d1}&d2=${d2}`;
 
-  const [infoRes, trendsRes, priceRes, sellersRes, brandsRes] = await Promise.all([
-    fetch(`${WB_BASE}/subject/${subjectId}?d1=${d1}&d2=${d2}`, { headers: h }),
-    fetch(`${WB_BASE}/subject/${subjectId}/trends`, { method: "POST", headers: h, body: JSON.stringify({ d1, d2 }) }),
-    fetch(`${WB_BASE}/subject/${subjectId}/price_segments`, { method: "POST", headers: h, body: JSON.stringify({ d1, d2 }) }),
-    fetch(`${WB_BASE}/subject/${subjectId}/sellers`, { method: "POST", headers: h, body: JSON.stringify({ d1, d2, startRow: 0, endRow: 10 }) }),
-    fetch(`${WB_BASE}/subject/${subjectId}/brands`, { method: "POST", headers: h, body: JSON.stringify({ d1, d2, startRow: 0, endRow: 5 }) }),
+  console.log("=== WB niche data for id:", subjectId, "period:", d1, d2);
+
+  const [infoRes, sellersRes, brandsRes, priceRes, trendsRes, byDateRes] = await Promise.all([
+    fetch(`${base}/${subjectId}`, { headers: h }),
+    fetch(`${base}/sellers?${q}&startRow=0&endRow=10`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+    fetch(`${base}/brands?${q}&startRow=0&endRow=5`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+    fetch(`${base}/price_segmentation?${q}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+    fetch(`${base}/trends?${q}&trends_by=week`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+    fetch(`${base}/by_date?${q}&groupBy=week`, { method: "POST", headers: h, body: JSON.stringify({}) }),
   ]);
 
-  const [info, trends, price, sellers, brands] = await Promise.all([
-    infoRes.json(), trendsRes.json(), priceRes.json(), sellersRes.json(), brandsRes.json(),
+  const results = await Promise.all([
+    infoRes.text(), sellersRes.text(), brandsRes.text(),
+    priceRes.text(), trendsRes.text(), byDateRes.text(),
   ]);
+
+  console.log("WB info status:", infoRes.status, results[0].slice(0, 100));
+  console.log("WB sellers status:", sellersRes.status, results[1].slice(0, 100));
+  console.log("WB brands status:", brandsRes.status, results[2].slice(0, 100));
+  console.log("WB price status:", priceRes.status, results[3].slice(0, 100));
+  console.log("WB trends status:", trendsRes.status, results[4].slice(0, 100));
+
+  const parse = (text: string) => { try { return JSON.parse(text); } catch { return {}; } };
+  const [info, sellers, brands, price, trends, byDate] = results.map(parse);
 
   return {
-    market: "wb", info,
-    trends: trends?.data ?? trends,
-    priceSegments: price?.data ?? price,
-    sellers: sellers?.data ?? sellers,
-    brands: brands?.data ?? brands,
+    market: "wb",
+    info,
+    sellers: sellers?.data ?? sellers ?? [],
+    brands: brands?.data ?? brands ?? [],
+    priceSegments: price?.data ?? price ?? [],
+    trends: trends?.data ?? trends ?? [],
+    byDate: byDate?.data ?? byDate ?? [],
   };
 }
 
 export async function getOzNicheData(nicheId: number) {
   const { d1, d2 } = getDates();
   const h = getHeaders();
+  const base = `${OZ_BASE}/niche`;
+  const q = `path=${nicheId}&d1=${d1}&d2=${d2}`;
 
-  const [infoRes, trendsRes, priceRes, sellersRes, brandsRes] = await Promise.all([
-    fetch(`${OZ_BASE}/niche/${nicheId}`, { headers: h }),
-    fetch(`${OZ_BASE}/niche/trends?path=${nicheId}&d1=${d1}&d2=${d2}&trends_by=week`, { method: "POST", headers: h, body: JSON.stringify({}) }),
-    fetch(`${OZ_BASE}/niche/price_segmentation?path=${nicheId}&d1=${d1}&d2=${d2}&segmentsCnt=8`, { method: "POST", headers: h, body: JSON.stringify({}) }),
-    fetch(`${OZ_BASE}/niche/sellers?path=${nicheId}&d1=${d1}&d2=${d2}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
-    fetch(`${OZ_BASE}/niche/brands?path=${nicheId}&d1=${d1}&d2=${d2}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+  const [infoRes, sellersRes, brandsRes, priceRes, trendsRes] = await Promise.all([
+    fetch(`${base}/${nicheId}`, { headers: h }),
+    fetch(`${base}/sellers?${q}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+    fetch(`${base}/brands?${q}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+    fetch(`${base}/price_segmentation?${q}&segmentsCnt=8`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+    fetch(`${base}/trends?${q}&trends_by=week`, { method: "POST", headers: h, body: JSON.stringify({}) }),
   ]);
 
-  const [info, trends, price, sellers, brands] = await Promise.all([
-    infoRes.json(), trendsRes.json(), priceRes.json(), sellersRes.json(), brandsRes.json(),
+  const results = await Promise.all([
+    infoRes.text(), sellersRes.text(), brandsRes.text(),
+    priceRes.text(), trendsRes.text(),
   ]);
+
+  const parse = (text: string) => { try { return JSON.parse(text); } catch { return {}; } };
+  const [info, sellers, brands, price, trends] = results.map(parse);
 
   return {
-    market: "oz", info,
+    market: "oz",
+    info,
+    sellers: sellers?.data ?? sellers ?? [],
+    brands: brands?.data ?? brands ?? [],
+    priceSegments: price?.data ?? price ?? [],
     trends: trends ?? [],
-    priceSegments: price ?? [],
-    sellers: sellers?.data ?? [],
-    brands: brands?.data ?? [],
   };
-}
-
-export async function detectMarketAndSearch(query: string) {
-  const { d1, d2 } = getDates();
-  const market = detectMarket(query);
-  let subjects: { id: unknown; name: unknown; market: string }[] = [];
-
-  if (market === "wb") {
-    subjects = await searchWbSubjects(query);
-  } else if (market === "oz") {
-    subjects = await searchOzNiches(query);
-  } else {
-    const [wb, oz] = await Promise.all([
-      searchWbSubjects(query),
-      searchOzNiches(query),
-    ]);
-    subjects = [...wb.slice(0, 4), ...oz.slice(0, 4)];
-  }
-
-  return { subjects, market, query, period: { d1, d2 } };
 }
 
 export async function POST(req: NextRequest) {
@@ -156,13 +154,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ type: "analysis", market: subjectMarket, data, period: { d1, d2 } });
     }
 
-    const result = await detectMarketAndSearch(query ?? "");
+    const market = detectMarket(query ?? "");
+    let subjects: { id: unknown; name: unknown; market: string }[] = [];
 
-    if (!result.subjects.length) {
+    if (market === "wb") {
+      subjects = await searchWbSubjects(query);
+    } else if (market === "oz") {
+      subjects = await searchOzNiches(query);
+    } else {
+      const [wb, oz] = await Promise.all([searchWbSubjects(query), searchOzNiches(query)]);
+      subjects = [...wb.slice(0, 4), ...oz.slice(0, 4)];
+    }
+
+    if (!subjects.length) {
       return NextResponse.json({ type: "not_found", query });
     }
 
-    return NextResponse.json({ type: "search", ...result });
+    return NextResponse.json({ type: "search", subjects, market, query });
 
   } catch (error) {
     console.error("MPStats route error:", error);
