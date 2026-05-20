@@ -150,6 +150,14 @@ async function describeImage(imageBase64: string): Promise<string> {
   }
 }
 
+function cleanSearchQuery(text: string): string {
+  return text
+    .replace(/анализ ниши|проанализируй нишу|анализ|ниша|ниши|посмотри|изучи|расскажи про|что думаешь про|на маркетплейсе|смотрю нишу|дай анализ|сделай анализ/gi, "")
+    .replace(/\bwb\b|\bвб\b|\bozon\b|\bозон\b|\bвайлдберриз\b|\bwildberries\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: string): string {
   const sellers = (data.sellers ?? []) as Record<string, unknown>[];
   const brands = (data.brands ?? []) as Record<string, unknown>[];
@@ -290,29 +298,35 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
       } catch (e) { console.error("Ozon report failed:", e); }
     }
 
-    // Нова — MPStats анализ ниши (сразу берём первый результат)
+    // Нова — MPStats анализ ниши
     if (agentId === "buyer-nova" && finalQuery) {
       try {
-        console.log("=== Nova TG: searching for:", finalQuery);
+        // Очищаем запрос от лишних слов
+        const searchQuery = cleanSearchQuery(finalQuery);
+        const queryToUse = searchQuery.length > 2 ? searchQuery : finalQuery;
+        
+        console.log("=== Nova TG: original:", finalQuery);
+        console.log("=== Nova TG: clean query:", queryToUse);
+
         const market = detectMarket(finalQuery);
         let subjects: { id: unknown; name: unknown; market: string }[] = [];
 
         if (market === "wb") {
-          subjects = await searchWbSubjects(finalQuery);
+          subjects = await searchWbSubjects(queryToUse);
         } else if (market === "oz") {
-          subjects = await searchOzNiches(finalQuery);
+          subjects = await searchOzNiches(queryToUse);
         } else {
           const [wb, oz] = await Promise.all([
-            searchWbSubjects(finalQuery),
-            searchOzNiches(finalQuery),
+            searchWbSubjects(queryToUse),
+            searchOzNiches(queryToUse),
           ]);
           subjects = [...wb.slice(0, 3), ...oz.slice(0, 3)];
         }
 
         console.log("=== Nova TG: found:", subjects.length, "subjects");
+        if (subjects.length > 0) console.log("=== Nova TG: first result:", subjects[0].name, subjects[0].market);
 
         if (subjects.length > 0) {
-          // Берём первую найденную нишу и сразу анализируем
           const first = subjects[0];
           console.log("=== Nova TG: analyzing:", first.name, first.market);
 
@@ -325,7 +339,7 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
             String(first.name)
           );
 
-          // Если нашли в обоих маркетах — добавляем второй тоже
+          // Если оба маркета — добавляем второй
           if (market === "both" && subjects.length > 1) {
             const second = subjects.find(s => s.market !== first.market);
             if (second) {
@@ -339,7 +353,7 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
             }
           }
         } else {
-          extraContext = `\n\n[MPStats не нашла нишу по запросу "${finalQuery}". Попроси уточнить — написать конкретное русское слово.]`;
+          extraContext = `\n\n[MPStats не нашла нишу по запросу "${queryToUse}". Попроси написать конкретное русское слово — например "термосы" или "наушники".]`;
         }
       } catch (e) {
         console.error("Nova MPStats TG error:", e);
