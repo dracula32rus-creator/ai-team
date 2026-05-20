@@ -23,53 +23,52 @@ function detectMarket(query: string): "wb" | "oz" | "both" {
   return "both";
 }
 
-async function searchWbSubjects(keyword: string) {
-  const token = process.env.MPSTATS_TOKEN;
-  console.log("MPStats token exists:", !!token, "length:", token?.length);
-  
+export async function searchWbSubjects(keyword: string) {
+  console.log("=== MPStats WB search:", keyword);
+  console.log("Token:", process.env.MPSTATS_TOKEN?.slice(0, 8) + "...");
+
   const res = await fetch(`${WB_BASE}/subjects`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify({ keyword, startRow: 0, endRow: 8 }),
   });
-  
+
   const text = await res.text();
-  console.log("MPStats WB subjects status:", res.status);
-  console.log("MPStats WB subjects response:", text.slice(0, 500));
-  
+  console.log("WB subjects status:", res.status);
+  console.log("WB subjects response:", text.slice(0, 300));
+
   if (!res.ok) return [];
-  
   try {
     const data = JSON.parse(text);
     return (data?.data ?? []).map((s: Record<string, unknown>) => ({
-      id: s.id,
-      name: s.name,
-      market: "wb",
+      id: s.id, name: s.name, market: "wb",
     }));
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
-async function searchOzNiches(keyword: string) {
+export async function searchOzNiches(keyword: string) {
+  console.log("=== MPStats OZ search:", keyword);
+
   const res = await fetch(`${OZ_BASE}/niche/list?search=${encodeURIComponent(keyword)}&startRow=0&endRow=8`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify({}),
   });
-  if (!res.ok) {
-    console.error("OZ niches error:", res.status, await res.text());
-    return [];
-  }
-  const data = await res.json();
-  return (data?.data ?? []).map((s: Record<string, unknown>) => ({
-    id: s.category_id,
-    name: s.category,
-    market: "oz",
-  }));
+
+  const text = await res.text();
+  console.log("OZ niches status:", res.status);
+  console.log("OZ niches response:", text.slice(0, 300));
+
+  if (!res.ok) return [];
+  try {
+    const data = JSON.parse(text);
+    return (data?.data ?? []).map((s: Record<string, unknown>) => ({
+      id: s.category_id, name: s.category, market: "oz",
+    }));
+  } catch { return []; }
 }
 
-async function getWbNicheData(subjectId: number) {
+export async function getWbNicheData(subjectId: number) {
   const { d1, d2 } = getDates();
   const h = getHeaders();
 
@@ -94,7 +93,7 @@ async function getWbNicheData(subjectId: number) {
   };
 }
 
-async function getOzNicheData(nicheId: number) {
+export async function getOzNicheData(nicheId: number) {
   const { d1, d2 } = getDates();
   const h = getHeaders();
 
@@ -119,19 +118,37 @@ async function getOzNicheData(nicheId: number) {
   };
 }
 
+export async function detectMarketAndSearch(query: string) {
+  const { d1, d2 } = getDates();
+  const market = detectMarket(query);
+  let subjects: { id: unknown; name: unknown; market: string }[] = [];
+
+  if (market === "wb") {
+    subjects = await searchWbSubjects(query);
+  } else if (market === "oz") {
+    subjects = await searchOzNiches(query);
+  } else {
+    const [wb, oz] = await Promise.all([
+      searchWbSubjects(query),
+      searchOzNiches(query),
+    ]);
+    subjects = [...wb.slice(0, 4), ...oz.slice(0, 4)];
+  }
+
+  return { subjects, market, query, period: { d1, d2 } };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { query, subjectId, subjectMarket } = body;
     const { d1, d2 } = getDates();
 
-    // Проверяем токен
     if (!process.env.MPSTATS_TOKEN) {
       console.error("MPSTATS_TOKEN is not set!");
-      return NextResponse.json({ error: "MPStats token not configured" }, { status: 500 });
+      return NextResponse.json({ error: "token_missing" }, { status: 500 });
     }
 
-    // Если уже выбрали конкретную нишу
     if (subjectId && subjectMarket) {
       const data = subjectMarket === "wb"
         ? await getWbNicheData(Number(subjectId))
@@ -139,30 +156,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ type: "analysis", market: subjectMarket, data, period: { d1, d2 } });
     }
 
-    // Поиск ниш
-    const market = detectMarket(query ?? "");
-    let subjects: { id: unknown; name: unknown; market: string }[] = [];
+    const result = await detectMarketAndSearch(query ?? "");
 
-    if (market === "wb") {
-      subjects = await searchWbSubjects(query);
-    } else if (market === "oz") {
-      subjects = await searchOzNiches(query);
-    } else {
-      const [wb, oz] = await Promise.all([
-        searchWbSubjects(query),
-        searchOzNiches(query),
-      ]);
-      subjects = [...wb.slice(0, 4), ...oz.slice(0, 4)];
-    }
-
-    if (!subjects.length) {
+    if (!result.subjects.length) {
       return NextResponse.json({ type: "not_found", query });
     }
 
-    return NextResponse.json({ type: "search", subjects, market, query });
+    return NextResponse.json({ type: "search", ...result });
 
   } catch (error) {
-    console.error("MPStats error:", error);
+    console.error("MPStats route error:", error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
