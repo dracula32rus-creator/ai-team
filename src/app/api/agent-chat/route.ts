@@ -4,7 +4,8 @@ import {
   searchOzNiches,
   getWbNicheData,
   getOzNicheData,
-} from "@/app/api/mpstats/route";
+  detectMarket,
+} from "@/lib/mpstats";
 
 function detectCategory(text: string): string {
   const t = text.toLowerCase();
@@ -58,13 +59,6 @@ function detectPlatform(text: string): string {
   if (t.match(/alibaba|алибаба/)) return "alibaba";
   if (t.match(/amazon|амазон/)) return "amazon";
   return "all";
-}
-
-function detectMarket(query: string): "wb" | "oz" | "both" {
-  const t = query.toLowerCase();
-  if (t.match(/\bwb\b|вб|вайлдберриз|wildberries/)) return "wb";
-  if (t.match(/\boz\b|озон|ozon/)) return "oz";
-  return "both";
 }
 
 async function searchProducts(query: string, platform: string) {
@@ -221,7 +215,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Нова — MPStats напрямую без HTTP
+  // Нова — MPStats напрямую через lib
   if (agentId === "buyer-nova") {
     const lastUserMessage = messages[messages.length - 1]?.content ?? "";
     const choiceMatch = lastUserMessage.trim().match(/^[1-8]$/);
@@ -235,6 +229,12 @@ export async function POST(req: NextRequest) {
           const chosen = subjects[parseInt(choiceMatch[0]) - 1];
           if (chosen) {
             console.log("=== Nova: loading niche data for", chosen.name, chosen.market);
+            const now = new Date();
+            const yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const d2 = yesterday.toISOString().split("T")[0];
+            const d1 = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
             const data = chosen.market === "wb"
               ? await getWbNicheData(Number(chosen.id))
               : await getOzNicheData(Number(chosen.id));
@@ -242,7 +242,7 @@ export async function POST(req: NextRequest) {
               ...data,
               subject: chosen,
               market: chosen.market,
-              period: { d1: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], d2: new Date().toISOString().split("T")[0] },
+              period: { d1, d2 },
             });
           }
         }
