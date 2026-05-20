@@ -29,22 +29,57 @@ export async function searchWbSubjects(keyword: string) {
   const res = await fetch(`${WB_BASE}/subject/list`, {
     method: "POST",
     headers: getHeaders(),
-    body: JSON.stringify({ keyword, startRow: 0, endRow: 8 }),
+    body: JSON.stringify({ keyword, startRow: 0, endRow: 50 }),
   });
   const text = await res.text();
   console.log("WB subject/list status:", res.status, text.slice(0, 200));
   if (!res.ok) return [];
   try {
     const data = JSON.parse(text);
-    return (data?.data ?? []).map((s: Record<string, unknown>) => ({
-      id: s.id, name: s.name, market: "wb",
+    const all = (data?.data ?? []) as Record<string, unknown>[];
+
+    const keywordLower = keyword.toLowerCase();
+    const keywords = keywordLower.split(/\s+/).filter(w => w.length > 2);
+
+    // Скорим каждый результат по релевантности
+    const scored = all.map((s) => {
+      const name = String(s.name ?? "").toLowerCase();
+      let score = 0;
+
+      // Точное совпадение — максимальный приоритет
+      if (name === keywordLower) score += 100;
+      // Название содержит весь запрос
+      else if (name.includes(keywordLower)) score += 50;
+      // Запрос содержит название
+      else if (keywordLower.includes(name)) score += 30;
+      // Каждое слово из запроса встречается в названии
+      for (const kw of keywords) {
+        if (name.includes(kw)) score += 10;
+      }
+
+      return { subject: s, score };
+    });
+
+    // Сортируем по убыванию score
+    scored.sort((a, b) => b.score - a.score);
+
+    // Берём только те что имеют хоть какое-то совпадение
+    const relevant = scored.filter(s => s.score > 0);
+    const result = relevant.length > 0 ? relevant.slice(0, 5) : scored.slice(0, 5);
+
+    console.log("WB top results:", result.slice(0, 3).map(s => `${s.subject.name}(${s.score})`));
+
+    return result.map(s => ({
+      id: s.subject.id,
+      name: s.subject.name,
+      market: "wb",
     }));
   } catch { return []; }
 }
 
 export async function searchOzNiches(keyword: string) {
   console.log("=== MPStats OZ search:", keyword);
-  const res = await fetch(`${OZ_BASE}/niche/list?search=${encodeURIComponent(keyword)}&startRow=0&endRow=8`, {
+  const res = await fetch(`${OZ_BASE}/niche/list?search=${encodeURIComponent(keyword)}&startRow=0&endRow=50`, {
     method: "POST",
     headers: getHeaders(),
     body: JSON.stringify({}),
@@ -54,8 +89,36 @@ export async function searchOzNiches(keyword: string) {
   if (!res.ok) return [];
   try {
     const data = JSON.parse(text);
-    return (data?.data ?? []).map((s: Record<string, unknown>) => ({
-      id: s.category_id, name: s.category, market: "oz",
+    const all = (data?.data ?? []) as Record<string, unknown>[];
+
+    const keywordLower = keyword.toLowerCase();
+    const keywords = keywordLower.split(/\s+/).filter(w => w.length > 2);
+
+    const scored = all.map((s) => {
+      const name = String(s.category ?? "").toLowerCase();
+      let score = 0;
+
+      if (name === keywordLower) score += 100;
+      else if (name.includes(keywordLower)) score += 50;
+      else if (keywordLower.includes(name)) score += 30;
+      for (const kw of keywords) {
+        if (name.includes(kw)) score += 10;
+      }
+
+      return { subject: s, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    const relevant = scored.filter(s => s.score > 0);
+    const result = relevant.length > 0 ? relevant.slice(0, 5) : scored.slice(0, 5);
+
+    console.log("OZ top results:", result.slice(0, 3).map(s => `${s.subject.category}(${s.score})`));
+
+    return result.map(s => ({
+      id: s.subject.category_id,
+      name: s.subject.category,
+      market: "oz",
     }));
   } catch { return []; }
 }
