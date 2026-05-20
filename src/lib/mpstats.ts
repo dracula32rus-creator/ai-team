@@ -25,55 +25,42 @@ export function detectMarket(query: string): "wb" | "oz" | "both" {
 }
 
 export async function searchWbSubjects(keyword: string) {
-  console.log("=== MPStats WB search:", keyword);
-  const res = await fetch(`${WB_BASE}/subject/list`, {
+  console.log("=== MPStats WB search via items:", keyword);
+
+  // Шаг 1 — ищем товары по ключевому слову
+  const itemsRes = await fetch(`${WB_BASE}/items?keyword=${encodeURIComponent(keyword)}&startRow=0&endRow=5`, {
     method: "POST",
     headers: getHeaders(),
-    body: JSON.stringify({ keyword, startRow: 0, endRow: 50 }),
+    body: JSON.stringify({}),
   });
-  const text = await res.text();
-  console.log("WB subject/list status:", res.status, text.slice(0, 200));
-  if (!res.ok) return [];
+  const itemsText = await itemsRes.text();
+  console.log("WB items status:", itemsRes.status, itemsText.slice(0, 200));
+  if (!itemsRes.ok) return [];
+
+  let firstItemId: number | null = null;
   try {
-    const data = JSON.parse(text);
-    const all = (data?.data ?? []) as Record<string, unknown>[];
+    const itemsData = JSON.parse(itemsText);
+    firstItemId = itemsData?.data?.[0]?.id ?? null;
+  } catch { return []; }
 
-    const keywordLower = keyword.toLowerCase();
-    const keywords = keywordLower.split(/\s+/).filter(w => w.length > 2);
+  if (!firstItemId) return [];
 
-    // Скорим каждый результат по релевантности
-    const scored = all.map((s) => {
-      const name = String(s.name ?? "").toLowerCase();
-      let score = 0;
+  // Шаг 2 — берём subject_id из первого товара
+  const itemRes = await fetch(`${WB_BASE}/items/${firstItemId}/full`, {
+    headers: getHeaders(),
+  });
+  const itemText = await itemRes.text();
+  console.log("WB item full status:", itemRes.status);
+  if (!itemRes.ok) return [];
 
-      // Точное совпадение — максимальный приоритет
-      if (name === keywordLower) score += 100;
-      // Название содержит весь запрос
-      else if (name.includes(keywordLower)) score += 50;
-      // Запрос содержит название
-      else if (keywordLower.includes(name)) score += 30;
-      // Каждое слово из запроса встречается в названии
-      for (const kw of keywords) {
-        if (name.includes(kw)) score += 10;
-      }
+  try {
+    const item = JSON.parse(itemText);
+    const subjectId = item?.subject?.id;
+    const subjectName = item?.subject?.name;
+    if (!subjectId) return [];
 
-      return { subject: s, score };
-    });
-
-    // Сортируем по убыванию score
-    scored.sort((a, b) => b.score - a.score);
-
-    // Берём только те что имеют хоть какое-то совпадение
-    const relevant = scored.filter(s => s.score > 0);
-    const result = relevant.length > 0 ? relevant.slice(0, 5) : scored.slice(0, 5);
-
-    console.log("WB top results:", result.slice(0, 3).map(s => `${s.subject.name}(${s.score})`));
-
-    return result.map(s => ({
-      id: s.subject.id,
-      name: s.subject.name,
-      market: "wb",
-    }));
+    console.log("WB found subject:", subjectId, subjectName);
+    return [{ id: subjectId, name: subjectName, market: "wb" }];
   } catch { return []; }
 }
 
