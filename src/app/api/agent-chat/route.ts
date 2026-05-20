@@ -116,41 +116,57 @@ async function getMpstatsData(query: string) {
   return await res.json();
 }
 
+async function getMpstatsAnalysis(subjectId: number, market: string) {
+  const res = await fetch("https://ai-team-42mz.vercel.app/api/mpstats", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subjectId, subjectMarket: market }),
+  });
+  return await res.json();
+}
+
 function formatMpstatsContext(data: Record<string, unknown>): string {
   if (!data || data.error) return "";
 
   const subject = data.subject as Record<string, unknown>;
-  const info = data.info as Record<string, unknown>;
-  const sellers = data.sellers as Record<string, unknown>[];
-  const brands = data.brands as Record<string, unknown>[];
-  const priceSegments = data.priceSegments as Record<string, unknown>[];
-  const trends = data.trends as Record<string, unknown>[];
+  const info = (data.info ?? data) as Record<string, unknown>;
+  const sellers = (data.sellers ?? []) as Record<string, unknown>[];
+  const brands = (data.brands ?? []) as Record<string, unknown>[];
+  const priceSegments = (data.priceSegments ?? []) as Record<string, unknown>[];
+  const trends = (data.trends ?? []) as Record<string, unknown>[];
   const period = data.period as Record<string, string>;
+  const market = data.market as string;
 
-  let ctx = `\n\n[LIVE MPSTATS DATA — Ниша: "${subject?.name}" за период ${period?.d1} — ${period?.d2}]\n\n`;
+  const marketLabel = market === "wb" ? "Wildberries" : market === "oz" ? "Ozon" : "";
 
-  // Основная инфа
+  let ctx = `\n\n[LIVE MPSTATS DATA — ${marketLabel} — Ниша: "${subject?.name}" за период ${period?.d1} — ${period?.d2}]\n\n`;
+
   if (info) {
-    ctx += `📊 ОСНОВНЫЕ ПОКАЗАТЕЛИ НИШИ:\n`;
+    ctx += `📊 ОСНОВНЫЕ ПОКАЗАТЕЛИ НИШИ (${marketLabel}):\n`;
     ctx += `• Выручка: ${info.revenue ? Number(info.revenue).toLocaleString("ru-RU") : "—"} ₽\n`;
-    ctx += `• Продажи: ${info.sales ?? "—"} шт\n`;
-    ctx += `• Товаров в нише: ${info.items ?? "—"}\n`;
-    ctx += `• Продавцов: ${info.sellers_count ?? "—"}\n`;
-    ctx += `• Брендов: ${info.brands_count ?? "—"}\n`;
-    ctx += `• Средняя цена: ${info.avg_price ? Number(info.avg_price).toLocaleString("ru-RU") : "—"} ₽\n`;
-    ctx += `• Средняя выручка на товар: ${info.revenue_per_item ? Number(info.revenue_per_item).toLocaleString("ru-RU") : "—"} ₽\n\n`;
+    ctx += `• Продажи: ${info.sales ?? info.sales ?? "—"} шт\n`;
+    ctx += `• Товаров в нише: ${info.items ?? info.items_count ?? "—"}\n`;
+    ctx += `• Продавцов: ${info.sellers_count ?? info.sellers ?? "—"}\n`;
+    ctx += `• Брендов: ${info.brands_count ?? info.brands ?? "—"}\n`;
+    ctx += `• Средняя цена: ${info.avg_price ?? info.avg_price_final ? Number(info.avg_price ?? info.avg_price_final).toLocaleString("ru-RU") : "—"} ₽\n\n`;
   }
 
-  // Топ продавцов
   if (sellers?.length) {
-    ctx += `🏆 ТОП-5 ПРОДАВЦОВ:\n`;
+    ctx += `🏆 ТОП-5 ПРОДАВЦОВ (${marketLabel}):\n`;
     sellers.slice(0, 5).forEach((s, i) => {
-      ctx += `${i + 1}. ${s.name ?? s.seller} — выручка: ${s.revenue ? Number(s.revenue).toLocaleString("ru-RU") : "—"} ₽, продажи: ${s.sales ?? "—"} шт, доля: ${s.revenue_share ?? "—"}%\n`;
+      const revenue = Number(s.revenue ?? 0);
+      const totalRevenue = sellers.slice(0, 5).reduce((sum, x) => sum + Number(x.revenue ?? 0), 0);
+      const share = totalRevenue > 0 ? ((revenue / totalRevenue) * 100).toFixed(1) : "—";
+      ctx += `${i + 1}. ${s.name ?? s.seller} — выручка: ${revenue.toLocaleString("ru-RU")} ₽, продажи: ${s.sales ?? "—"} шт, доля: ${s.revenue_share ?? share}%\n`;
     });
 
-    // Монополизация — доля топ-3
     if (sellers.length >= 3) {
-      const top3Share = sellers.slice(0, 3).reduce((sum: number, s) => sum + (Number(s.revenue_share) || 0), 0);
+      const totalRev = sellers.reduce((sum, s) => sum + Number(s.revenue ?? 0), 0);
+      const top3Rev = sellers.slice(0, 3).reduce((sum, s) => sum + Number(s.revenue ?? 0), 0);
+      const top3Share = sellers[0]?.revenue_share
+        ? sellers.slice(0, 3).reduce((sum, s) => sum + Number(s.revenue_share ?? 0), 0)
+        : totalRev > 0 ? (top3Rev / totalRev) * 100 : 0;
+
       ctx += `\n⚠️ МОНОПОЛИЗАЦИЯ: Топ-3 продавца занимают ${top3Share.toFixed(1)}% рынка`;
       if (top3Share > 60) ctx += " — рынок ВЫСОКО монополизирован, сложно зайти";
       else if (top3Share > 40) ctx += " — рынок умеренно монополизирован";
@@ -159,36 +175,37 @@ function formatMpstatsContext(data: Record<string, unknown>): string {
     }
   }
 
-  // Топ брендов
   if (brands?.length) {
-    ctx += `🏷️ ТОП-5 БРЕНДОВ:\n`;
+    ctx += `🏷️ ТОП-5 БРЕНДОВ (${marketLabel}):\n`;
     brands.slice(0, 5).forEach((b, i) => {
-      ctx += `${i + 1}. ${b.name ?? b.brand} — выручка: ${b.revenue ? Number(b.revenue).toLocaleString("ru-RU") : "—"} ₽, доля: ${b.revenue_share ?? "—"}%\n`;
+      ctx += `${i + 1}. ${b.name ?? b.brand} — выручка: ${b.revenue ? Number(b.revenue).toLocaleString("ru-RU") : "—"} ₽\n`;
     });
     ctx += "\n";
   }
 
-  // Ценовая сегментация
   if (priceSegments?.length) {
-    ctx += `💰 ЦЕНОВАЯ СЕГМЕНТАЦИЯ:\n`;
+    ctx += `💰 ЦЕНОВАЯ СЕГМЕНТАЦИЯ (${marketLabel}):\n`;
     priceSegments.forEach((seg) => {
-      ctx += `• ${seg.price_from ?? seg.min_price}–${seg.price_to ?? seg.max_price} ₽: ${seg.items_count ?? seg.items} тов, выручка ${seg.revenue ? Number(seg.revenue).toLocaleString("ru-RU") : "—"} ₽, доля ${seg.revenue_share ?? "—"}%\n`;
+      const from = seg.price_from ?? seg.min_range_price ?? seg.min_price ?? "?";
+      const to = seg.price_to ?? seg.max_range_price ?? seg.max_price ?? "?";
+      const revenue = seg.revenue ? Number(seg.revenue).toLocaleString("ru-RU") : "—";
+      const items = seg.items_count ?? seg.items ?? "—";
+      const share = seg.revenue_share ?? "—";
+      ctx += `• ${from}–${to} ₽: ${items} тов, выручка ${revenue} ₽, доля ${share}%\n`;
     });
     ctx += "\n";
   }
 
-  // Тренды
   if (trends?.length) {
     const first = trends[0] as Record<string, unknown>;
     const last = trends[trends.length - 1] as Record<string, unknown>;
     const revenueFirst = Number(first?.revenue ?? 0);
     const revenueLast = Number(last?.revenue ?? 0);
     const trendPct = revenueFirst > 0 ? (((revenueLast - revenueFirst) / revenueFirst) * 100).toFixed(1) : "—";
-    ctx += `📈 ТРЕНД: ${Number(trendPct) > 0 ? "↑ Растущая" : "↓ Падающая"} ниша (${trendPct}% за период)\n\n`;
+    ctx += `📈 ТРЕНД (${marketLabel}): ${Number(trendPct) > 0 ? "↑ Растущая" : "↓ Падающая"} ниша (${trendPct}% за период)\n\n`;
   }
 
   ctx += `Используй эти РЕАЛЬНЫЕ данные из MPStats для анализа. Сделай структурированный отчёт с таблицами в markdown формате.`;
-
   return ctx;
 }
 
@@ -221,16 +238,68 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Нова — MPStats анализ ниши
+  // Нова — MPStats анализ ниши (двухшаговый)
   if (agentId === "buyer-nova") {
     const lastUserMessage = messages[messages.length - 1]?.content ?? "";
-    try {
-      const mpstatsData = await getMpstatsData(lastUserMessage);
-      if (!mpstatsData.error) {
-        extraContext = formatMpstatsContext(mpstatsData);
+    const choiceMatch = lastUserMessage.trim().match(/^[1-8]$/);
+    const prevAssistantMsg = messages.length >= 2
+      ? (messages[messages.length - 2]?.content ?? "")
+      : "";
+
+    if (choiceMatch && prevAssistantMsg.includes("MPStats_SUBJECTS:")) {
+      // Пользователь выбрал нишу из списка
+      try {
+        const jsonMatch = prevAssistantMsg.match(/MPStats_SUBJECTS:([\s\S]+?)MPStats_END/);
+        if (jsonMatch) {
+          const subjects = JSON.parse(jsonMatch[1]);
+          const chosen = subjects[parseInt(choiceMatch[0]) - 1];
+          if (chosen) {
+            const analysis = await getMpstatsAnalysis(Number(chosen.id), chosen.market);
+            if (analysis?.data) {
+              extraContext = formatMpstatsContext({
+                ...analysis.data,
+                subject: chosen,
+                market: chosen.market,
+                period: analysis.period,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Failed to parse subjects choice:", e);
       }
-    } catch (e) {
-      console.error("MPStats failed:", e);
+    } else {
+      // Первый запрос — ищем ниши
+      try {
+        const mpstatsData = await getMpstatsData(lastUserMessage);
+
+        if (mpstatsData.type === "search" && mpstatsData.subjects?.length) {
+          const marketLabel = mpstatsData.market === "wb" ? "WB" : mpstatsData.market === "oz" ? "Ozon" : "WB + Ozon";
+          const list = mpstatsData.subjects
+            .map((s: { name: string; market: string }, i: number) =>
+              `${i + 1}. [${s.market.toUpperCase()}] ${s.name}`
+            ).join("\n");
+
+          extraContext = `\n\n[MPStats нашла следующие ниши по запросу "${mpstatsData.query}" (${marketLabel}):]
+${list}
+
+MPStats_SUBJECTS:${JSON.stringify(mpstatsData.subjects)}MPStats_END
+
+Выведи пользователю этот список ниш красиво с номерами и маркетом в скобках. Попроси выбрать цифрой. Не анализируй сам — жди выбора пользователя. Не задавай лишних вопросов.`;
+
+        } else if (mpstatsData.type === "analysis") {
+          extraContext = formatMpstatsContext({
+            ...mpstatsData.data,
+            market: mpstatsData.market,
+            period: mpstatsData.period,
+          });
+
+        } else if (mpstatsData.type === "not_found") {
+          extraContext = `\n\n[MPStats не нашла нишу по запросу "${mpstatsData.query}". Скажи пользователю что ниша не найдена и попроси уточнить название — использовать более конкретное слово на русском языке.]`;
+        }
+      } catch (e) {
+        console.error("MPStats failed:", e);
+      }
     }
   }
 
