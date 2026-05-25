@@ -25,9 +25,39 @@ export function detectMarket(query: string): "wb" | "oz" | "both" {
 }
 
 export async function searchWbSubjects(keyword: string) {
-  console.log("=== MPStats WB search via items:", keyword);
+  console.log("=== MPStats WB search/subjects:", keyword);
+  const { d1, d2 } = getDates();
 
-  // Шаг 1 — ищем товары по ключевому слову
+  const res = await fetch(
+    `${WB_BASE}/search/subjects?path=${encodeURIComponent(keyword)}&d1=${d1}&d2=${d2}`,
+    { method: "POST", headers: getHeaders(), body: JSON.stringify({}) }
+  );
+  const text = await res.text();
+  console.log("WB search/subjects status:", res.status, text.slice(0, 300));
+  if (!res.ok) {
+    console.log("WB search/subjects failed, trying items fallback...");
+    return await searchWbSubjectsFallback(keyword);
+  }
+
+  try {
+    const data = JSON.parse(text);
+    const items = Array.isArray(data) ? data : (data?.data ?? []);
+    if (!items.length) {
+      console.log("WB search/subjects empty, trying items fallback...");
+      return await searchWbSubjectsFallback(keyword);
+    }
+    console.log("WB search/subjects results:", items.slice(0, 3).map((s: Record<string, unknown>) => s.name));
+    return items.slice(0, 5).map((s: Record<string, unknown>) => ({
+      id: s.id, name: s.name, market: "wb",
+    }));
+  } catch {
+    return await searchWbSubjectsFallback(keyword);
+  }
+}
+
+async function searchWbSubjectsFallback(keyword: string) {
+  console.log("=== MPStats WB fallback via items:", keyword);
+
   const itemsRes = await fetch(`${WB_BASE}/items?keyword=${encodeURIComponent(keyword)}&startRow=0&endRow=5`, {
     method: "POST",
     headers: getHeaders(),
@@ -45,7 +75,6 @@ export async function searchWbSubjects(keyword: string) {
 
   if (!firstItemId) return [];
 
-  // Шаг 2 — берём subject_id из первого товара
   const itemRes = await fetch(`${WB_BASE}/items/${firstItemId}/full`, {
     headers: getHeaders(),
   });
@@ -58,8 +87,7 @@ export async function searchWbSubjects(keyword: string) {
     const subjectId = item?.subject?.id;
     const subjectName = item?.subject?.name;
     if (!subjectId) return [];
-
-    console.log("WB found subject:", subjectId, subjectName);
+    console.log("WB fallback found subject:", subjectId, subjectName);
     return [{ id: subjectId, name: subjectName, market: "wb" }];
   } catch { return []; }
 }
@@ -84,19 +112,16 @@ export async function searchOzNiches(keyword: string) {
     const scored = all.map((s) => {
       const name = String(s.category ?? "").toLowerCase();
       let score = 0;
-
       if (name === keywordLower) score += 100;
       else if (name.includes(keywordLower)) score += 50;
       else if (keywordLower.includes(name)) score += 30;
       for (const kw of keywords) {
         if (name.includes(kw)) score += 10;
       }
-
       return { subject: s, score };
     });
 
     scored.sort((a, b) => b.score - a.score);
-
     const relevant = scored.filter(s => s.score > 0);
     const result = relevant.length > 0 ? relevant.slice(0, 5) : scored.slice(0, 5);
 
