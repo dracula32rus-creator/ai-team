@@ -150,12 +150,39 @@ async function describeImage(imageBase64: string): Promise<string> {
   }
 }
 
-function cleanSearchQuery(text: string): string {
-  return text
-    .replace(/анализ ниши|проанализируй нишу|анализ|ниша|ниши|посмотри|изучи|расскажи про|что думаешь про|на маркетплейсе|смотрю нишу|дай анализ|сделай анализ/gi, "")
-    .replace(/\bwb\b|\bвб\b|\bozon\b|\bозон\b|\bвайлдберриз\b|\bwildberries\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
+async function extractSearchKeyword(text: string): Promise<string> {
+  try {
+    const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4.6",
+        max_tokens: 20,
+        messages: [{
+          role: "user",
+          content: `Извлеки из фразы ТОЛЬКО название товара или категории для поиска на маркетплейсе. Верни ОДНО-ДВА слова на русском. Без объяснений, только слово(а).
+
+Примеры:
+"аналитика по термосам" → термосы
+"дай анализ ниши наушники WB" → наушники
+"что думаешь про вибраторы" → вибраторы
+"аналитика по 18+" → товары для взрослых
+"смотрю нишу кроссовки озон" → кроссовки
+"анализ ниши книги" → книги
+"посмотри термосы на вб" → термосы
+
+Фраза: "${text}"`,
+        }],
+      }),
+    });
+    const data = await res.json();
+    const keyword = data.choices?.[0]?.message?.content?.trim() ?? "";
+    console.log("=== Extracted keyword:", keyword, "from:", text);
+    return keyword.length > 1 ? keyword : text;
+  } catch (e) {
+    console.error("Keyword extraction failed:", e);
+    return text;
+  }
 }
 
 function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: string): string {
@@ -301,12 +328,9 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
     // Нова — MPStats анализ ниши
     if (agentId === "buyer-nova" && finalQuery) {
       try {
-        // Очищаем запрос от лишних слов
-        const searchQuery = cleanSearchQuery(finalQuery);
-        const queryToUse = searchQuery.length > 2 ? searchQuery : finalQuery;
-        
+        const queryToUse = await extractSearchKeyword(finalQuery);
         console.log("=== Nova TG: original:", finalQuery);
-        console.log("=== Nova TG: clean query:", queryToUse);
+        console.log("=== Nova TG: extracted keyword:", queryToUse);
 
         const market = detectMarket(finalQuery);
         let subjects: { id: unknown; name: unknown; market: string }[] = [];
@@ -328,8 +352,6 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
 
         if (subjects.length > 0) {
           const first = subjects[0];
-          console.log("=== Nova TG: analyzing:", first.name, first.market);
-
           const nicheData = first.market === "wb"
             ? await getWbNicheData(Number(first.id))
             : await getOzNicheData(Number(first.id));
@@ -339,7 +361,6 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
             String(first.name)
           );
 
-          // Если оба маркета — добавляем второй
           if (market === "both" && subjects.length > 1) {
             const second = subjects.find(s => s.market !== first.market);
             if (second) {
@@ -353,7 +374,7 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
             }
           }
         } else {
-          extraContext = `\n\n[MPStats не нашла нишу по запросу "${queryToUse}". Попроси написать конкретное русское слово — например "термосы" или "наушники".]`;
+          extraContext = `\n\n[MPStats не нашла нишу по запросу "${queryToUse}". Попроси написать конкретное название товара.]`;
         }
       } catch (e) {
         console.error("Nova MPStats TG error:", e);
