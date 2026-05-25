@@ -208,7 +208,6 @@ function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: st
       const share = totalRev > 0 ? ((revenue / totalRev) * 100).toFixed(1) : "—";
       ctx += `${i + 1}. ${s.name} — ${revenue.toLocaleString("ru-RU")} ₽ (${s.revenue_share ?? share}%)\n`;
     });
-
     if (sellers.length >= 3) {
       const top3Rev = sellers.slice(0, 3).reduce((sum, s) => sum + Number(s.revenue ?? 0), 0);
       const top3Share = totalRev > 0 ? ((top3Rev / totalRev) * 100).toFixed(1) : "0";
@@ -249,6 +248,182 @@ function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: st
 
   ctx += `Используй эти РЕАЛЬНЫЕ данные из MPStats. Сделай структурированный отчёт с таблицами. Дай итоговую оценку — заходить или нет, лучший ценовой сегмент.`;
   return ctx;
+}
+
+function generateNovaHtmlReport(markdown: string, nicheName: string): string {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+
+  const html = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Анализ ниши: ${nicheName}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e8e8e8; padding: 32px; }
+  .header { background: linear-gradient(135deg, #993C1D, #c4522a); border-radius: 16px; padding: 32px; margin-bottom: 24px; }
+  .header h1 { font-size: 28px; font-weight: 700; color: white; margin-bottom: 8px; }
+  .header .meta { font-size: 14px; color: rgba(255,255,255,0.7); }
+  .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 24px; margin-bottom: 16px; }
+  h2 { font-size: 18px; font-weight: 600; color: #ff6b3d; margin-bottom: 16px; border-bottom: 1px solid #2a2a2a; padding-bottom: 8px; }
+  h3 { font-size: 15px; font-weight: 600; color: #e8e8e8; margin: 16px 0 8px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  th { background: #252525; color: #999; font-weight: 500; padding: 10px 12px; text-align: left; border-bottom: 1px solid #333; }
+  td { padding: 10px 12px; border-bottom: 1px solid #222; color: #e8e8e8; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1f1f1f; }
+  p { color: #ccc; line-height: 1.6; margin: 8px 0; font-size: 14px; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; margin: 2px; }
+  .badge-green { background: #1a3a1a; color: #4caf50; border: 1px solid #4caf50; }
+  .badge-red { background: #3a1a1a; color: #f44336; border: 1px solid #f44336; }
+  .badge-yellow { background: #3a3a1a; color: #ff9800; border: 1px solid #ff9800; }
+  .verdict { background: linear-gradient(135deg, #1a2a1a, #1a3a1a); border: 1px solid #4caf50; border-radius: 12px; padding: 20px; margin-top: 16px; }
+  .verdict.bad { background: linear-gradient(135deg, #2a1a1a, #3a1a1a); border-color: #f44336; }
+  .verdict.neutral { background: linear-gradient(135deg, #2a2a1a, #3a3a1a); border-color: #ff9800; }
+  .verdict h3 { color: #4caf50; margin: 0 0 8px; }
+  .verdict.bad h3 { color: #f44336; }
+  .verdict.neutral h3 { color: #ff9800; }
+  .footer { text-align: center; color: #555; font-size: 12px; margin-top: 24px; }
+  strong { color: #fff; }
+  ul { padding-left: 20px; }
+  li { color: #ccc; line-height: 1.8; font-size: 14px; }
+  blockquote { border-left: 3px solid #993C1D; padding-left: 16px; margin: 12px 0; color: #aaa; font-style: italic; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📊 ${nicheName}</h1>
+  <div class="meta">Анализ ниши MPStats · ${dateStr}</div>
+</div>
+<div id="content">
+${convertMarkdownToHtml(markdown)}
+</div>
+<div class="footer">Powered by MPStats · AI Team WB/Ozon · ${dateStr}</div>
+</body>
+</html>`;
+
+  return html;
+}
+
+function convertMarkdownToHtml(md: string): string {
+  const lines = md.split("\n");
+  let html = "";
+  let inTable = false;
+  let inCard = false;
+  let tableRows = "";
+  let tableHeader = "";
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Заголовки h2
+    if (line.startsWith("## ")) {
+      if (inTable) { html += buildTable(tableHeader, tableRows); inTable = false; tableRows = ""; tableHeader = ""; }
+      if (inCard) { html += "</div>"; inCard = false; }
+      html += `<div class="card"><h2>${line.replace("## ", "")}</h2>`;
+      inCard = true;
+      continue;
+    }
+
+    // Заголовки h3
+    if (line.startsWith("### ")) {
+      if (inTable) { html += buildTable(tableHeader, tableRows); inTable = false; tableRows = ""; tableHeader = ""; }
+      html += `<h3>${line.replace("### ", "")}</h3>`;
+      continue;
+    }
+
+    // Таблицы
+    if (line.startsWith("|")) {
+      if (line.includes("---")) continue;
+      if (!inTable) {
+        inTable = true;
+        tableHeader = line;
+      } else {
+        tableRows += line + "\n";
+      }
+      continue;
+    } else if (inTable) {
+      html += buildTable(tableHeader, tableRows);
+      inTable = false;
+      tableRows = "";
+      tableHeader = "";
+    }
+
+    // Вердикт
+    if (line.includes("ЗАХОДИМ") || line.includes("🔥")) {
+      html += `<div class="verdict"><h3>✅ ЗАХОДИМ 🔥</h3><p>${formatInline(line)}</p></div>`;
+      continue;
+    }
+    if (line.includes("НЕ ЗАХОДИМ") || line.includes("🚫")) {
+      html += `<div class="verdict bad"><h3>🚫 НЕ ЗАХОДИМ</h3><p>${formatInline(line)}</p></div>`;
+      continue;
+    }
+    if (line.includes("ДУМАЕМ") || line.includes("🤔")) {
+      html += `<div class="verdict neutral"><h3>🤔 ДУМАЕМ</h3><p>${formatInline(line)}</p></div>`;
+      continue;
+    }
+
+    // Blockquote
+    if (line.startsWith("> ")) {
+      html += `<blockquote>${formatInline(line.replace("> ", ""))}</blockquote>`;
+      continue;
+    }
+
+    // Список
+    if (line.startsWith("- ") || line.startsWith("* ")) {
+      html += `<ul><li>${formatInline(line.replace(/^[-*] /, ""))}</li></ul>`;
+      continue;
+    }
+
+    // Разделитель
+    if (line.startsWith("---")) {
+      continue;
+    }
+
+    // Обычный текст
+    if (line.trim()) {
+      html += `<p>${formatInline(line)}</p>`;
+    }
+  }
+
+  if (inTable) html += buildTable(tableHeader, tableRows);
+  if (inCard) html += "</div>";
+
+  return html;
+}
+
+function buildTable(header: string, rows: string): string {
+  const headers = header.split("|").filter(h => h.trim()).map(h => `<th>${h.trim()}</th>`).join("");
+  const bodyRows = rows.trim().split("\n").filter(r => r.trim() && !r.includes("---")).map(row => {
+    const cells = row.split("|").filter(c => c.trim()).map(c => `<td>${formatInline(c.trim())}</td>`).join("");
+    return `<tr>${cells}</tr>`;
+  }).join("");
+  return `<table><thead><tr>${headers}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+}
+
+function formatInline(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/🟢/g, '<span class="badge badge-green">🟢 Хорошо</span>')
+    .replace(/🔴/g, '<span class="badge badge-red">🔴 Риск</span>')
+    .replace(/🟡/g, '<span class="badge badge-yellow">🟡 Средне</span>');
+}
+
+async function sendNovaHtmlReport(botToken: string, chatId: number, html: string, nicheName: string): Promise<void> {
+  try {
+    const fileName = `nova-report-${nicheName.replace(/[^а-яёa-z0-9]/gi, "-").toLowerCase()}-${Date.now()}.html`;
+    const buffer = Buffer.from(html, "utf-8");
+    const formData = new FormData();
+    formData.append("chat_id", String(chatId));
+    formData.append("caption", `📊 Анализ ниши: ${nicheName}`);
+    formData.append("document", new Blob([buffer], { type: "text/html" }), fileName);
+    await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, { method: "POST", body: formData });
+  } catch (e) {
+    console.error("Nova HTML report send error:", e);
+  }
 }
 
 export async function handleTelegramMessage(update: TelegramUpdate, agentId: string, botToken: string) {
@@ -303,6 +478,7 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
     const finalQuery = [photoDescription, cleanText].filter(Boolean).join(". ");
     let extraContext = "";
     let ozonReportPeriod: { from: string; to: string } | null = null;
+    let novaSubjectName = "";
 
     // Финн — Ozon отчёт
     if (agentId === "cfo-finn" && needsOzonReport(finalQuery)) {
@@ -348,10 +524,10 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
         }
 
         console.log("=== Nova TG: found:", subjects.length, "subjects");
-        if (subjects.length > 0) console.log("=== Nova TG: first result:", subjects[0].name, subjects[0].market);
 
         if (subjects.length > 0) {
           const first = subjects[0];
+          novaSubjectName = String(first.name);
           const nicheData = first.market === "wb"
             ? await getWbNicheData(Number(first.id))
             : await getOzNicheData(Number(first.id));
@@ -364,6 +540,7 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
           if (market === "both" && subjects.length > 1) {
             const second = subjects.find(s => s.market !== first.market);
             if (second) {
+              novaSubjectName = queryToUse;
               const secondData = second.market === "wb"
                 ? await getWbNicheData(Number(second.id))
                 : await getOzNicheData(Number(second.id));
@@ -401,7 +578,7 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
       headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-sonnet-4.6",
-        max_tokens: 1500,
+        max_tokens: agentId === "buyer-nova" ? 4000 : 1500,
         messages: [
           { role: "system", content: agent.systemPrompt + extraContext },
           { role: "user", content: finalQuery || "Проанализируй присланное фото" },
@@ -412,7 +589,15 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
     const data = await res.json();
     const response = data.choices?.[0]?.message?.content ?? "Не смог ответить, попробуй ещё раз.";
 
-    await sendTelegramMessage(botToken, chatId, response);
+    // Нова — отправляем короткое сообщение + HTML файл
+    if (agentId === "buyer-nova" && novaSubjectName) {
+      const shortMsg = `📊 Анализ ниши *${novaSubjectName}* готов — смотри файл ниже 👇`;
+      await sendTelegramMessage(botToken, chatId, shortMsg);
+      const html = generateNovaHtmlReport(response, novaSubjectName);
+      await sendNovaHtmlReport(botToken, chatId, html, novaSubjectName);
+    } else {
+      await sendTelegramMessage(botToken, chatId, response);
+    }
 
     if (ozonReportPeriod) {
       await sendOzonExcel(botToken, chatId, ozonReportPeriod.from, ozonReportPeriod.to);
