@@ -25,38 +25,7 @@ export function detectMarket(query: string): "wb" | "oz" | "both" {
 }
 
 export async function searchWbSubjects(keyword: string) {
-  console.log("=== MPStats WB search/subjects:", keyword);
-  const { d1, d2 } = getDates();
-
-  const res = await fetch(
-    `${WB_BASE}/search/subjects?path=${encodeURIComponent(keyword)}&d1=${d1}&d2=${d2}`,
-    { method: "POST", headers: getHeaders(), body: JSON.stringify({}) }
-  );
-  const text = await res.text();
-  console.log("WB search/subjects status:", res.status, text.slice(0, 300));
-  if (!res.ok) {
-    console.log("WB search/subjects failed, trying items fallback...");
-    return await searchWbSubjectsFallback(keyword);
-  }
-
-  try {
-    const data = JSON.parse(text);
-    const items = Array.isArray(data) ? data : (data?.data ?? []);
-    if (!items.length) {
-      console.log("WB search/subjects empty, trying items fallback...");
-      return await searchWbSubjectsFallback(keyword);
-    }
-    console.log("WB search/subjects results:", items.slice(0, 3).map((s: Record<string, unknown>) => s.name));
-    return items.slice(0, 5).map((s: Record<string, unknown>) => ({
-      id: s.id, name: s.name, market: "wb",
-    }));
-  } catch {
-    return await searchWbSubjectsFallback(keyword);
-  }
-}
-
-async function searchWbSubjectsFallback(keyword: string) {
-  console.log("=== MPStats WB fallback via items:", keyword);
+  console.log("=== MPStats WB search via items:", keyword);
 
   const itemsRes = await fetch(`${WB_BASE}/items?keyword=${encodeURIComponent(keyword)}&startRow=0&endRow=5`, {
     method: "POST",
@@ -87,13 +56,49 @@ async function searchWbSubjectsFallback(keyword: string) {
     const subjectId = item?.subject?.id;
     const subjectName = item?.subject?.name;
     if (!subjectId) return [];
-    console.log("WB fallback found subject:", subjectId, subjectName);
+    console.log("WB found subject:", subjectId, subjectName);
     return [{ id: subjectId, name: subjectName, market: "wb" }];
   } catch { return []; }
 }
 
 export async function searchOzNiches(keyword: string) {
-  console.log("=== MPStats OZ search:", keyword);
+  console.log("=== MPStats OZ search via items:", keyword);
+
+  const itemsRes = await fetch(`${OZ_BASE}/items?keyword=${encodeURIComponent(keyword)}&startRow=0&endRow=5`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({}),
+  });
+  const itemsText = await itemsRes.text();
+  console.log("OZ items status:", itemsRes.status, itemsText.slice(0, 200));
+
+  if (itemsRes.ok) {
+    try {
+      const itemsData = JSON.parse(itemsText);
+      const firstItemId = itemsData?.data?.[0]?.id ?? null;
+
+      if (firstItemId) {
+        const itemRes = await fetch(`${OZ_BASE}/items/${firstItemId}/full`, {
+          headers: getHeaders(),
+        });
+        const itemText = await itemRes.text();
+        console.log("OZ item full status:", itemRes.status, itemText.slice(0, 200));
+
+        if (itemRes.ok) {
+          const item = JSON.parse(itemText);
+          const nicheId = item?.niche?.id;
+          const nicheName = item?.niche?.name;
+          if (nicheId) {
+            console.log("OZ found niche via items:", nicheId, nicheName);
+            return [{ id: nicheId, name: nicheName, market: "oz" }];
+          }
+        }
+      }
+    } catch { /* fallback */ }
+  }
+
+  // Fallback — поиск через niche/list
+  console.log("OZ items fallback to niche/list...");
   const res = await fetch(`${OZ_BASE}/niche/list?search=${encodeURIComponent(keyword)}&startRow=0&endRow=50`, {
     method: "POST",
     headers: getHeaders(),
@@ -102,6 +107,7 @@ export async function searchOzNiches(keyword: string) {
   const text = await res.text();
   console.log("OZ niche/list status:", res.status, text.slice(0, 200));
   if (!res.ok) return [];
+
   try {
     const data = JSON.parse(text);
     const all = (data?.data ?? []) as Record<string, unknown>[];
@@ -125,7 +131,7 @@ export async function searchOzNiches(keyword: string) {
     const relevant = scored.filter(s => s.score > 0);
     const result = relevant.length > 0 ? relevant.slice(0, 5) : scored.slice(0, 5);
 
-    console.log("OZ top results:", result.slice(0, 3).map(s => `${s.subject.category}(${s.score})`));
+    console.log("OZ niche/list results:", result.slice(0, 3).map(s => `${s.subject.category}(${s.score})`));
 
     return result.map(s => ({
       id: s.subject.category_id,
