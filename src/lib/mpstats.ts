@@ -74,54 +74,21 @@ export async function searchWbSubjects(keyword: string) {
 }
 
 export async function searchOzNiches(keyword: string) {
-  console.log("=== MPStats OZ search via items:", keyword);
+  console.log("=== MPStats OZ search via niche/list full scan:", keyword);
 
-  const itemsRes = await fetch(`${OZ_BASE}/items?keyword=${encodeURIComponent(keyword)}&startRow=0&endRow=5`, {
+  const res = await fetch(`${OZ_BASE}/niche/list`, {
     method: "POST",
     headers: getHeaders(),
-    body: JSON.stringify({}),
-  });
-  const itemsText = await itemsRes.text();
-  console.log("OZ items status:", itemsRes.status, itemsText.slice(0, 200));
-
-  if (itemsRes.ok) {
-    try {
-      const itemsData = JSON.parse(itemsText);
-      const firstItemId = itemsData?.data?.[0]?.id ?? null;
-
-      if (firstItemId) {
-        const itemRes = await fetch(`${OZ_BASE}/items/${firstItemId}/full`, {
-          headers: getHeaders(),
-        });
-        const itemText = await itemRes.text();
-        console.log("OZ item full status:", itemRes.status, itemText.slice(0, 200));
-
-        if (itemRes.ok) {
-          const item = JSON.parse(itemText);
-          const nicheId = item?.niche?.id;
-          const nicheName = item?.niche?.name;
-          if (nicheId) {
-            console.log("OZ found niche via items:", nicheId, nicheName);
-            return [{ id: nicheId, name: nicheName, market: "oz" }];
-          }
-        }
-      }
-    } catch { /* fallback */ }
-  }
-
-  console.log("OZ items fallback to niche/list...");
-  const res = await fetch(`${OZ_BASE}/niche/list?search=${encodeURIComponent(keyword)}&startRow=0&endRow=50`, {
-    method: "POST",
-    headers: getHeaders(),
-    body: JSON.stringify({}),
+    body: JSON.stringify({ startRow: 0, endRow: 5000 }),
   });
   const text = await res.text();
-  console.log("OZ niche/list status:", res.status, text.slice(0, 200));
+  console.log("OZ niche/list full scan status:", res.status, text.slice(0, 100));
   if (!res.ok) return [];
 
   try {
     const data = JSON.parse(text);
     const all = (data?.data ?? []) as Record<string, unknown>[];
+
     const keywordLower = keyword.toLowerCase();
     const keywords = keywordLower.split(/\s+/).filter(w => w.length > 2);
 
@@ -137,12 +104,13 @@ export async function searchOzNiches(keyword: string) {
       return { subject: s, score };
     });
 
-    scored.sort((a, b) => b.score - a.score);
-    const relevant = scored.filter(s => s.score > 0);
-    const result = relevant.length > 0 ? relevant.slice(0, 5) : scored.slice(0, 5);
+    const relevant = scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score);
+    console.log("OZ relevant niches:", relevant.slice(0, 3).map(s => `${s.subject.category}(${s.score})`));
 
-    return result.map(s => ({
-      id: s.subject.category_id,
+    if (relevant.length === 0) return [];
+
+    return relevant.slice(0, 3).map(s => ({
+      id: s.subject.id,
       name: s.subject.category,
       market: "oz",
     }));
