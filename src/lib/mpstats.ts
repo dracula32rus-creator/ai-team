@@ -23,7 +23,7 @@ function getYearDates() {
   yesterday.setDate(yesterday.getDate() - 1);
   const d2 = yesterday.toISOString().split("T")[0];
   const yearAgo = new Date(now);
-  yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+  yearAgo.setFullYear(yearAgo.getFullYear() - 4); // ← было -1, теперь 4 года
   yearAgo.setDate(1);
   const d1 = yearAgo.toISOString().split("T")[0];
   return { d1, d2 };
