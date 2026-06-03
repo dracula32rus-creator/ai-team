@@ -251,7 +251,6 @@ function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: st
 }
 
 // ─── ИНТЕРАКТИВНЫЙ ГРАФИК ТРЕНДА ─────────────────────────────────────────────
-// market: "wb" | "oz" — определяет цветовую схему и заголовок
 function buildInteractiveTrendChart(
   trends: Record<string, unknown>[],
   market: "wb" | "oz"
@@ -260,43 +259,36 @@ function buildInteractiveTrendChart(
 
   const points = trends.map(t => ({
     label: String(t.label_date ?? t.date ?? ""),
-    revenue:     Number(t.revenue      ?? t.orders_sum        ?? 0),
-    orders:      Number(t.orders       ?? t.purchases         ?? 0),
-    buyouts:     Number(t.buyouts      ?? t.buyouts_count     ?? 0),
-    buyouts_sum: Number(t.buyouts_sum  ?? t.buyout_revenue    ?? t.revenue_buyouts ?? 0),
+    revenue:     Number(t.revenue      ?? t.orders_sum     ?? 0),
+    orders:      Number(t.orders       ?? t.purchases      ?? 0),
+    buyouts:     Number(t.buyouts      ?? t.buyouts_count  ?? 0),
+    buyouts_sum: Number(t.buyouts_sum  ?? t.buyout_revenue ?? t.revenue_buyouts ?? 0),
   }));
 
   const dataJson = JSON.stringify(points);
   const marketLabel = market === "wb" ? "Wildberries" : "Ozon";
-  // WB — зелёный (#17BF50), Ozon — синий (#185FA5)
   const primaryColor = market === "wb" ? "#17BF50" : "#185FA5";
-  const chartId = `tc_${market}_${Date.now()}`;
+  const secondColor  = market === "wb" ? "#4DF085"  : "#54A3E0";
+  const chartId = `tc_${market}`;
 
   return `
 <div id="${chartId}_root" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:20px 22px;margin-bottom:16px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
     <div>
       <div style="font-size:16px;font-weight:700;color:#e8e8e8;">📈 Тренд ниши ${marketLabel} (4 года)</div>
-      <div style="font-size:12px;color:#666;margin-top:2px;">По месяцам · можно выбрать несколько метрик · наведи на точку</div>
+      <div style="font-size:12px;color:#666;margin-top:2px;">По месяцам · несколько метрик · наведи на точку</div>
     </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;" id="${chartId}_mtabs">
-      <button onclick="${chartId}_toggle('revenue',this)"     id="${chartId}_t_revenue"     class="${chartId}_tab ${chartId}_tab_on" style="border-color:${primaryColor};background:${primaryColor}22;color:${primaryColor};">Сумма заказов</button>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;" id="${chartId}_tabs">
+      <button onclick="${chartId}_toggle('revenue',this)"     id="${chartId}_t_revenue"     class="${chartId}_tab" style="border-color:${primaryColor};background:${primaryColor}22;color:${primaryColor};">Сумма заказов</button>
       <button onclick="${chartId}_toggle('orders',this)"      id="${chartId}_t_orders"      class="${chartId}_tab">Кол-во заказов</button>
       <button onclick="${chartId}_toggle('buyouts',this)"     id="${chartId}_t_buyouts"     class="${chartId}_tab">Кол-во выкупов</button>
       <button onclick="${chartId}_toggle('buyouts_sum',this)" id="${chartId}_t_buyouts_sum" class="${chartId}_tab">Сумма выкупов</button>
     </div>
   </div>
-
   <style>
-    .${chartId}_tab {
-      background:#222;border:1.5px solid #333;border-radius:7px;
-      padding:5px 12px;font-size:12px;font-weight:600;color:#666;
-      cursor:pointer;transition:all .15s;
-    }
-    .${chartId}_tab:hover { border-color:#555; }
-    .${chartId}_tab_on { border-color:${primaryColor} !important; background:${primaryColor}22 !important; color:${primaryColor} !important; }
+    .${chartId}_tab{background:#222;border:1.5px solid #333;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;color:#666;cursor:pointer;transition:all .15s;}
+    .${chartId}_tab:hover{border-color:#555;}
   </style>
-
   <div style="position:relative;" id="${chartId}_wrap">
     <div id="${chartId}_tt" style="display:none;position:absolute;z-index:20;background:#0f0f0f;color:#e8e8e8;border:1px solid #333;border-radius:9px;padding:10px 14px;font-size:12px;line-height:1.8;pointer-events:none;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.5);"></div>
     <div style="overflow-x:auto;" id="${chartId}_scroll">
@@ -305,251 +297,116 @@ function buildInteractiveTrendChart(
   </div>
   <div id="${chartId}_legend" style="display:flex;gap:14px;margin-top:10px;font-size:12px;color:#666;flex-wrap:wrap;"></div>
 </div>
-
 <script>
 (function(){
-  var DATA = ${dataJson};
-  var PRIMARY = "${primaryColor}";
-  var MARKET_LABEL = "${marketLabel}";
-  var CID = "${chartId}";
-
-  var METRIC_COLORS = {
-    revenue:     PRIMARY,
-    orders:      "${market === "wb" ? "#4DF085" : "#54A3E0"}",
-    buyouts:     "#BA7517",
-    buyouts_sum: "#993C1D",
-  };
-  var METRIC_LABELS = {
-    revenue:"Сумма заказов", orders:"Кол-во заказов",
-    buyouts:"Кол-во выкупов", buyouts_sum:"Сумма выкупов",
-  };
-
-  var activeMetrics = {"revenue": true};
-
-  var canvas  = document.getElementById(CID+"_canvas");
-  var tooltip = document.getElementById(CID+"_tt");
-  var legend  = document.getElementById(CID+"_legend");
-  var scroll  = document.getElementById(CID+"_scroll");
-  var ctx     = canvas.getContext("2d");
-
-  var PAD = {top:24, right:24, bottom:58, left:80};
-  var H = 260;
-
-  function fmtV(v, m) {
-    if(m==="revenue"||m==="buyouts_sum"){
-      if(v>=1e9) return (v/1e9).toFixed(1)+" млрд ₽";
-      if(v>=1e6) return (v/1e6).toFixed(1)+" млн ₽";
-      if(v>=1e3) return (v/1e3).toFixed(0)+" тыс ₽";
-      return v.toLocaleString("ru-RU")+" ₽";
-    } else {
-      if(v>=1e6) return (v/1e6).toFixed(1)+" млн шт";
-      if(v>=1e3) return (v/1e3).toFixed(0)+" тыс шт";
-      return v.toLocaleString("ru-RU")+" шт";
-    }
+  var DATA=${dataJson};
+  var PRIMARY="${primaryColor}",SEC="${secondColor}";
+  var CID="${chartId}";
+  var MCOLORS={revenue:PRIMARY,orders:SEC,buyouts:"#BA7517",buyouts_sum:"#993C1D"};
+  var MLABELS={revenue:"Сумма заказов",orders:"Кол-во заказов",buyouts:"Кол-во выкупов",buyouts_sum:"Сумма выкупов"};
+  var active={revenue:true};
+  var canvas=document.getElementById(CID+"_canvas");
+  var tt=document.getElementById(CID+"_tt");
+  var leg=document.getElementById(CID+"_legend");
+  var scr=document.getElementById(CID+"_scroll");
+  var ctx=canvas.getContext("2d");
+  var PAD={top:24,right:24,bottom:58,left:80},H=260;
+  function fmtV(v,m){
+    if(m==="revenue"||m==="buyouts_sum"){if(v>=1e9)return(v/1e9).toFixed(1)+" млрд ₽";if(v>=1e6)return(v/1e6).toFixed(1)+" млн ₽";if(v>=1e3)return(v/1e3).toFixed(0)+" тыс ₽";return v.toLocaleString("ru-RU")+" ₽";}
+    else{if(v>=1e6)return(v/1e6).toFixed(1)+" млн шт";if(v>=1e3)return(v/1e3).toFixed(0)+" тыс шт";return v.toLocaleString("ru-RU")+" шт";}
   }
-  function fmtA(v, m) {
-    if(m==="revenue"||m==="buyouts_sum"){
-      if(v>=1e9) return (v/1e9).toFixed(1)+"млрд";
-      if(v>=1e6) return (v/1e6).toFixed(1)+"млн";
-      if(v>=1e3) return (v/1e3).toFixed(0)+"тыс";
-      return v.toFixed(0);
-    } else {
-      if(v>=1e6) return (v/1e6).toFixed(1)+"млн";
-      if(v>=1e3) return (v/1e3).toFixed(0)+"тыс";
-      return v.toFixed(0);
-    }
+  function fmtA(v,m){
+    if(m==="revenue"||m==="buyouts_sum"){if(v>=1e9)return(v/1e9).toFixed(1)+"млрд";if(v>=1e6)return(v/1e6).toFixed(1)+"млн";if(v>=1e3)return(v/1e3).toFixed(0)+"тыс";return v.toFixed(0);}
+    else{if(v>=1e6)return(v/1e6).toFixed(1)+"млн";if(v>=1e3)return(v/1e3).toFixed(0)+"тыс";return v.toFixed(0);}
   }
-
-  function hexToRgb(hex) {
-    var r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
-    return r+","+g+","+b;
+  function getActive(){return Object.keys(active).filter(function(k){return active[k];});}
+  function minmax(){
+    var lo=Infinity,hi=0,ms=getActive();
+    for(var i=0;i<DATA.length;i++)for(var j=0;j<ms.length;j++){var v=Number(DATA[i][ms[j]]||0);if(v>hi)hi=v;if(v<lo)lo=v;}
+    if(hi===0)hi=1;if(lo===Infinity)lo=0;return{lo:lo,hi:hi};
   }
-
-  function getActiveArr() {
-    return Object.keys(activeMetrics).filter(function(k){ return activeMetrics[k]; });
-  }
-
-  function globalMinMax() {
-    var lo=Infinity, hi=0;
-    var ms = getActiveArr();
-    for(var i=0;i<DATA.length;i++) for(var j=0;j<ms.length;j++){
-      var v=Number(DATA[i][ms[j]]||0);
-      if(v>hi)hi=v; if(v<lo)lo=v;
-    }
-    if(hi===0)hi=1; if(lo===Infinity)lo=0;
-    return {lo:lo, hi:hi};
-  }
-
-  function draw() {
-    var labels = DATA.map(function(d){ return d.label; });
-    var N = labels.length;
-    var colW = Math.max(16, Math.min(36, Math.floor(520/N)));
-    var W = PAD.left + N*colW + PAD.right;
-
-    canvas.width=W; canvas.height=H;
-    canvas.style.width=W+"px"; canvas.style.height=H+"px";
+  function draw(){
+    var N=DATA.length,colW=Math.max(16,Math.min(36,Math.floor(520/N)));
+    var W=PAD.left+N*colW+PAD.right;
+    canvas.width=W;canvas.height=H;canvas.style.width=W+"px";canvas.style.height=H+"px";
     ctx.clearRect(0,0,W,H);
-
-    var mm = globalMinMax();
-    var lo=mm.lo, hi=mm.hi, range=hi-lo||1;
-    var chartH = H-PAD.top-PAD.bottom;
-    function toY(v){ return PAD.top+chartH-((v-lo)/range)*chartH; }
-    function toX(i){ return PAD.left+i*colW+colW/2; }
-
-    // Grid Y
-    var primaryM = getActiveArr()[0] || "revenue";
+    var mm=minmax(),lo=mm.lo,hi=mm.hi,range=hi-lo||1,chartH=H-PAD.top-PAD.bottom;
+    function toY(v){return PAD.top+chartH-((v-lo)/range)*chartH;}
+    function toX(i){return PAD.left+i*colW+colW/2;}
+    var ms=getActive(),pm=ms[0]||"revenue";
     ctx.font="11px -apple-system,sans-serif";
     for(var gi=0;gi<=4;gi++){
-      var ratio=gi/4, gy=toY(lo+ratio*range);
-      ctx.strokeStyle="rgba(255,255,255,0.06)"; ctx.lineWidth=1;
-      ctx.beginPath(); ctx.moveTo(PAD.left,gy); ctx.lineTo(W-PAD.right,gy); ctx.stroke();
-      ctx.fillStyle="#555"; ctx.textAlign="right";
-      ctx.fillText(fmtA(lo+ratio*range, primaryM), PAD.left-6, gy+4);
+      var gy=toY(lo+(gi/4)*range);
+      ctx.strokeStyle="rgba(255,255,255,0.06)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD.left,gy);ctx.lineTo(W-PAD.right,gy);ctx.stroke();
+      ctx.fillStyle="#555";ctx.textAlign="right";ctx.fillText(fmtA(lo+(gi/4)*range,pm),PAD.left-6,gy+4);
     }
-
-    // X axis — подписи месяцев и год
     var prevYr="";
     for(var xi=0;xi<N;xi++){
-      var lbl=labels[xi], yr=lbl.slice(0,4), mo=lbl.slice(5);
-      var xx=toX(xi);
+      var lbl=DATA[xi].label,yr=lbl.slice(0,4),mo=lbl.slice(5),xx=toX(xi);
       if(yr!==prevYr){
-        ctx.fillStyle="rgba(255,255,255,0.04)";
-        ctx.fillRect(xx-colW/2, PAD.top, colW, chartH);
-        ctx.font="bold 11px -apple-system,sans-serif"; ctx.fillStyle=PRIMARY; ctx.textAlign="center";
-        ctx.fillText(yr, xx, H-PAD.bottom+30);
+        ctx.fillStyle="rgba(255,255,255,0.03)";ctx.fillRect(xx-colW/2,PAD.top,colW,chartH);
+        ctx.font="bold 11px -apple-system,sans-serif";ctx.fillStyle=PRIMARY;ctx.textAlign="center";ctx.fillText(yr,xx,H-PAD.bottom+30);
         prevYr=yr;
       }
-      if(xi%3===0){
-        ctx.font="10px -apple-system,sans-serif"; ctx.fillStyle="#555"; ctx.textAlign="center";
-        ctx.fillText(mo, xx, H-PAD.bottom+16);
-      }
+      if(xi%3===0){ctx.font="10px -apple-system,sans-serif";ctx.fillStyle="#555";ctx.textAlign="center";ctx.fillText(mo,xx,H-PAD.bottom+16);}
     }
-
-    // Линии для каждой активной метрики
-    var metricsArr = getActiveArr();
-    for(var mi=0;mi<metricsArr.length;mi++){
-      var met=metricsArr[mi], color=METRIC_COLORS[met];
-      var rgb=hexToRgb(color);
-
-      var pts=[];
-      for(var pi=0;pi<N;pi++){
-        pts.push({x:toX(pi), y:toY(Number(DATA[pi][met]||0))});
-      }
-
-      // Area fill
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, toY(lo));
-      ctx.lineTo(pts[0].x, pts[0].y);
+    for(var mi=0;mi<ms.length;mi++){
+      var met=ms[mi],color=MCOLORS[met];
+      var r=parseInt(color.slice(1,3),16),g=parseInt(color.slice(3,5),16),b=parseInt(color.slice(5,7),16);
+      var pts=DATA.map(function(d,i){return{x:toX(i),y:toY(Number(d[met]||0))};});
+      // area
+      ctx.beginPath();ctx.moveTo(pts[0].x,toY(lo));ctx.lineTo(pts[0].x,pts[0].y);
       for(var ci=0;ci<pts.length-1;ci++){
-        var p0=ci>0?pts[ci-1]:pts[ci], p1=pts[ci], p2=pts[ci+1], p3=ci<pts.length-2?pts[ci+2]:pts[ci+1];
-        var cp1x=p1.x+(p2.x-p0.x)/4, cp1y=p1.y+(p2.y-p0.y)/4;
-        var cp2x=p2.x-(p3.x-p1.x)/4, cp2y=p2.y-(p3.y-p1.y)/4;
-        ctx.bezierCurveTo(cp1x,cp1y,cp2x,cp2y,p2.x,p2.y);
+        var p0=ci>0?pts[ci-1]:pts[ci],p1=pts[ci],p2=pts[ci+1],p3=ci<pts.length-2?pts[ci+2]:pts[ci+1];
+        ctx.bezierCurveTo(p1.x+(p2.x-p0.x)/4,p1.y+(p2.y-p0.y)/4,p2.x-(p3.x-p1.x)/4,p2.y-(p3.y-p1.y)/4,p2.x,p2.y);
       }
-      ctx.lineTo(pts[pts.length-1].x, toY(lo));
-      ctx.closePath();
-      ctx.fillStyle="rgba("+rgb+","+(metricsArr.length>1?0.04:0.08)+")";
-      ctx.fill();
-
-      // Плавная линия Безье
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
+      ctx.lineTo(pts[pts.length-1].x,toY(lo));ctx.closePath();
+      ctx.fillStyle="rgba("+r+","+g+","+b+","+(ms.length>1?0.04:0.08)+")";ctx.fill();
+      // line
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
       for(var li=0;li<pts.length-1;li++){
-        var lp0=li>0?pts[li-1]:pts[li], lp1=pts[li], lp2=pts[li+1], lp3=li<pts.length-2?pts[li+2]:pts[li+1];
-        var lcp1x=lp1.x+(lp2.x-lp0.x)/4, lcp1y=lp1.y+(lp2.y-lp0.y)/4;
-        var lcp2x=lp2.x-(lp3.x-lp1.x)/4, lcp2y=lp2.y-(lp3.y-lp1.y)/4;
-        ctx.bezierCurveTo(lcp1x,lcp1y,lcp2x,lcp2y,lp2.x,lp2.y);
+        var lp0=li>0?pts[li-1]:pts[li],lp1=pts[li],lp2=pts[li+1],lp3=li<pts.length-2?pts[li+2]:pts[li+1];
+        ctx.bezierCurveTo(lp1.x+(lp2.x-lp0.x)/4,lp1.y+(lp2.y-lp0.y)/4,lp2.x-(lp3.x-lp1.x)/4,lp2.y-(lp3.y-lp1.y)/4,lp2.x,lp2.y);
       }
-      ctx.strokeStyle=color; ctx.lineWidth=2.5;
-      ctx.lineJoin="round"; ctx.lineCap="round"; ctx.stroke();
-
-      // Точки каждые 3 + первая/последняя
+      ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.lineJoin="round";ctx.lineCap="round";ctx.stroke();
+      // dots
       for(var di=0;di<pts.length;di++){
-        if(di%3!==0&&di!==0&&di!==pts.length-1) continue;
-        ctx.beginPath(); ctx.arc(pts[di].x, pts[di].y, 3, 0, Math.PI*2);
-        ctx.fillStyle=color; ctx.fill();
-        ctx.strokeStyle="#1a1a1a"; ctx.lineWidth=1.5; ctx.stroke();
+        if(di%3!==0&&di!==0&&di!==pts.length-1)continue;
+        ctx.beginPath();ctx.arc(pts[di].x,pts[di].y,3,0,Math.PI*2);
+        ctx.fillStyle=color;ctx.fill();ctx.strokeStyle="#1a1a1a";ctx.lineWidth=1.5;ctx.stroke();
       }
     }
-
-    // Легенда
-    legend.innerHTML = metricsArr.map(function(met){
-      return '<div style="display:flex;align-items:center;gap:5px;">'+
-        '<span style="width:14px;height:3px;border-radius:2px;background:'+METRIC_COLORS[met]+';display:inline-block;"></span>'+
-        '<span>'+MARKET_LABEL+' — '+METRIC_LABELS[met]+'</span></div>';
-    }).join("");
-
-    canvas._labels = labels;
-    canvas._pts_map = {};
-    metricsArr.forEach(function(met){
-      canvas._pts_map[met] = DATA.map(function(d,i){ return {x:toX(i), y:toY(Number(d[met]||0))}; });
-    });
-    canvas._colW = colW;
-    canvas._N = N;
-    canvas._toY = toY;
+    leg.innerHTML=ms.map(function(m){return'<div style="display:flex;align-items:center;gap:5px;"><span style="width:14px;height:3px;border-radius:2px;background:'+MCOLORS[m]+';display:inline-block;"></span><span>'+MLABELS[m]+'</span></div>';}).join("");
+    canvas._N=N;canvas._colW=colW;canvas._toY=toY;canvas._toX=toX;canvas._chartH=chartH;canvas._lo=lo;
   }
-
-  function onMove(e) {
-    if(!canvas._labels) return;
-    var rect=canvas.getBoundingClientRect();
-    var sx=scroll.scrollLeft;
+  function onMove(e){
+    if(!canvas._N)return;
+    var rect=canvas.getBoundingClientRect(),sx=scr.scrollLeft;
     var mx=(e.clientX-rect.left)+sx;
     var idx=Math.round((mx-PAD.left-canvas._colW/2)/canvas._colW);
-    if(idx<0||idx>=canvas._N){ tooltip.style.display="none"; return; }
-
-    var lbl=canvas._labels[idx];
-    var metricsArr=getActiveArr();
-    var html='<div style="font-weight:700;color:'+PRIMARY+';margin-bottom:5px;font-size:13px;">'+lbl+'</div>';
-    for(var i=0;i<metricsArr.length;i++){
-      var met=metricsArr[i];
-      var v=Number(DATA[idx][met]||0);
-      html+='<div style="display:flex;align-items:center;gap:6px;">'+
-        '<span style="width:8px;height:8px;border-radius:50%;background:'+METRIC_COLORS[met]+';flex-shrink:0;"></span>'+
-        '<span style="color:#888;">'+METRIC_LABELS[met]+':</span> '+
-        '<span style="font-weight:600;color:#e8e8e8;">'+fmtV(v,met)+'</span></div>';
+    if(idx<0||idx>=canvas._N){tt.style.display="none";return;}
+    var ms=getActive(),html='<div style="font-weight:700;color:'+PRIMARY+';margin-bottom:5px;">'+DATA[idx].label+'</div>';
+    for(var i=0;i<ms.length;i++){
+      var v=Number(DATA[idx][ms[i]]||0);
+      html+='<div style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:'+MCOLORS[ms[i]]+';flex-shrink:0;"></span><span style="color:#888;">'+MLABELS[ms[i]]+':</span> <span style="font-weight:600;">'+fmtV(v,ms[i])+'</span></div>';
     }
-    tooltip.innerHTML=html;
-    tooltip.style.display="block";
-
-    // Умное позиционирование — тултип всегда в видимой области
-    var ttW=tooltip.offsetWidth||180;
-    var visW=scroll.clientWidth;
-    var xOnScreen=PAD.left+idx*canvas._colW+canvas._colW/2-sx;
-
-    var left=xOnScreen+14;
-    if(left+ttW>visW-8) left=xOnScreen-ttW-14;
-    if(left<4) left=4;
-
-    var firstMet=metricsArr[0]||"revenue";
-    var ptY=canvas._pts_map[firstMet]?canvas._pts_map[firstMet][idx].y:50;
-    var ttH=tooltip.offsetHeight||80;
-    var top=Math.max(4, ptY-ttH-10);
-    if(top+ttH>H-PAD.bottom-10) top=Math.max(4, ptY+14);
-
-    tooltip.style.left=left+"px";
-    tooltip.style.top=top+"px";
+    tt.innerHTML=html;tt.style.display="block";
+    var ttW=tt.offsetWidth||180,visW=scr.clientWidth;
+    var xScr=PAD.left+idx*canvas._colW+canvas._colW/2-sx;
+    var left=xScr+14;if(left+ttW>visW-8)left=xScr-ttW-14;if(left<4)left=4;
+    var pm=ms[0]||"revenue",ptY=canvas._toY(Number(DATA[idx][pm]||0));
+    var ttH=tt.offsetHeight||80,top=Math.max(4,ptY-ttH-10);
+    if(top+ttH>H-PAD.bottom-10)top=Math.max(4,ptY+14);
+    tt.style.left=left+"px";tt.style.top=top+"px";
   }
-
-  canvas.addEventListener("mousemove", onMove);
-  canvas.addEventListener("mouseleave", function(){ tooltip.style.display="none"; });
-
-  window[CID+"_toggle"] = function(met, btn) {
-    var keys=Object.keys(activeMetrics).filter(function(k){ return activeMetrics[k]; });
-    if(activeMetrics[met]){
-      if(keys.length===1) return; // минимум 1 активная
-      activeMetrics[met]=false;
-      btn.classList.remove(CID+"_tab_on");
-      btn.style.borderColor=""; btn.style.background=""; btn.style.color="";
-    } else {
-      activeMetrics[met]=true;
-      btn.classList.add(CID+"_tab_on");
-      btn.style.borderColor=METRIC_COLORS[met];
-      btn.style.background=METRIC_COLORS[met]+"22";
-      btn.style.color=METRIC_COLORS[met];
-    }
+  canvas.addEventListener("mousemove",onMove);
+  canvas.addEventListener("mouseleave",function(){tt.style.display="none";});
+  window[CID+"_toggle"]=function(met,btn){
+    var keys=Object.keys(active).filter(function(k){return active[k];});
+    if(active[met]){if(keys.length===1)return;active[met]=false;btn.style.borderColor="";btn.style.background="";btn.style.color="";}
+    else{active[met]=true;btn.style.borderColor=MCOLORS[met];btn.style.background=MCOLORS[met]+"22";btn.style.color=MCOLORS[met];}
     draw();
   };
-
   draw();
 })();
 </script>`;
@@ -565,12 +422,10 @@ function generateNovaHtmlReport(
   const now = new Date();
   const dateStr = now.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
   const marketLabel = market === "wb" ? "Wildberries" : "Ozon";
-  // WB — оранжевый заголовок, Ozon — синий
   const headerGradient = market === "wb"
     ? "linear-gradient(135deg, #993C1D, #c4522a)"
     : "linear-gradient(135deg, #0d3f6e, #185FA5)";
   const accentColor = market === "wb" ? "#ff6b3d" : "#4A9EE0";
-
   const chartHtml = buildInteractiveTrendChart(trends, market);
 
   return `<!DOCTYPE html>
@@ -702,40 +557,17 @@ async function sendNovaHtmlReport(
   market: "wb" | "oz"
 ): Promise<void> {
   try {
-    const marketSuffix = market === "wb" ? "wb" : "oz";
-    const fileName = `nova-${nicheName.replace(/[^а-яёa-z0-9]/gi, "-").toLowerCase()}-${marketSuffix}-${Date.now()}.html`;
+    const marketLabel = market === "wb" ? "Wildberries" : "Ozon";
+    const fileName = `nova-${nicheName.replace(/[^а-яёa-z0-9]/gi, "-").toLowerCase()}-${market}-${Date.now()}.html`;
     const buffer = Buffer.from(html, "utf-8");
     const formData = new FormData();
     formData.append("chat_id", String(chatId));
-    const marketLabel = market === "wb" ? "Wildberries" : "Ozon";
     formData.append("caption", `📊 ${nicheName} — ${marketLabel}`);
     formData.append("document", new Blob([buffer], { type: "text/html" }), fileName);
     await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, { method: "POST", body: formData });
   } catch (e) {
     console.error("Nova HTML report send error:", e);
   }
-}
-
-// Запрос к Claude для генерации отчёта по одному маркету
-async function generateNovaReport(
-  agent: { systemPrompt: string },
-  finalQuery: string,
-  extraContext: string
-): Promise<string> {
-  const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4.6",
-      max_tokens: 4000,
-      messages: [
-        { role: "system", content: agent.systemPrompt + extraContext },
-        { role: "user", content: finalQuery },
-      ],
-    }),
-  });
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content ?? "Не смог сформировать отчёт.";
 }
 
 export async function handleTelegramMessage(update: TelegramUpdate, agentId: string, botToken: string) {
@@ -790,8 +622,15 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
     const finalQuery = [photoDescription, cleanText].filter(Boolean).join(". ");
     let extraContext = "";
     let ozonReportPeriod: { from: string; to: string } | null = null;
+    let novaSubjectName = "";
+    let novaWbTrends: Record<string, unknown>[] = [];
+    let novaOzTrends: Record<string, unknown>[] = [];
+    // Для двойного отчёта — данные по каждому маркету
+    let wbNicheData: Awaited<ReturnType<typeof getWbNicheData>> | null = null;
+    let ozNicheData: Awaited<ReturnType<typeof getOzNicheData>> | null = null;
+    let wbNicheName = "";
+    let ozNicheName = "";
 
-    // ── CFO Finn ──────────────────────────────────────────────────────────────
     if (agentId === "cfo-finn" && needsOzonReport(finalQuery)) {
       try {
         const period = extractPeriod(finalQuery);
@@ -812,90 +651,54 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
       } catch (e) { console.error("Ozon report failed:", e); }
     }
 
-    // ── Buyer Nova ────────────────────────────────────────────────────────────
     if (agentId === "buyer-nova" && finalQuery) {
       try {
         const queryToUse = await extractSearchKeyword(finalQuery);
         console.log("=== Nova TG: original:", finalQuery, "| keyword:", queryToUse);
 
         const market = detectMarket(finalQuery);
+        let subjects: { id: unknown; name: unknown; market: string }[] = [];
 
-        // Структура данных для каждого маркета
-        type MarketData = {
-          nicheData: Awaited<ReturnType<typeof getWbNicheData>>;
-          nicheName: string;
-          market: "wb" | "oz";
-        };
-        const reports: MarketData[] = [];
-
-        if (market === "wb" || market === "both") {
-          const wbSubjects = await searchWbSubjects(queryToUse);
-          if (wbSubjects.length > 0) {
-            const nicheData = await getWbNicheData(Number(wbSubjects[0].id));
-            reports.push({ nicheData, nicheName: String(wbSubjects[0].name) || queryToUse, market: "wb" });
-          }
+        if (market === "wb") {
+          subjects = await searchWbSubjects(queryToUse);
+        } else if (market === "oz") {
+          subjects = await searchOzNiches(queryToUse);
+        } else {
+          // both — параллельно
+          const [wb, oz] = await Promise.all([
+            searchWbSubjects(queryToUse),
+            searchOzNiches(queryToUse),
+          ]);
+          subjects = [...wb.slice(0, 1), ...oz.slice(0, 1)];
         }
 
-        if (market === "oz" || market === "both") {
-          const ozNiches = await searchOzNiches(queryToUse);
-          if (ozNiches.length > 0) {
-            const nicheData = await getOzNicheData(Number(ozNiches[0].id));
-            reports.push({ nicheData, nicheName: String(ozNiches[0].name) || queryToUse, market: "oz" });
+        console.log("=== Nova TG: found:", subjects.length, "subjects for market:", market);
+
+        if (subjects.length > 0) {
+          novaSubjectName = queryToUse;
+
+          // Грузим данные для каждого найденного маркета
+          for (const subj of subjects) {
+            if (subj.market === "wb") {
+              wbNicheData = await getWbNicheData(Number(subj.id));
+              wbNicheName = String(subj.name) || queryToUse;
+              novaWbTrends = wbNicheData.trends as Record<string, unknown>[];
+              extraContext += "\n\n" + formatMpstatsForTelegram({ ...wbNicheData, market: "wb" }, wbNicheName);
+            } else {
+              ozNicheData = await getOzNicheData(Number(subj.id));
+              ozNicheName = String(subj.name) || queryToUse;
+              novaOzTrends = ozNicheData.trends as Record<string, unknown>[];
+              extraContext += "\n\n" + formatMpstatsForTelegram({ ...ozNicheData, market: "oz" }, ozNicheName);
+            }
           }
-        }
-
-        console.log("=== Nova: found reports for:", reports.map(r => r.market).join(", "));
-
-        if (reports.length === 0) {
+        } else {
           extraContext = `\n\n[MPStats не нашла нишу по запросу "${queryToUse}". Попроси написать конкретное название товара.]`;
-          // Обычный текстовый ответ
-          const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: "claude-sonnet-4.6",
-              max_tokens: 1000,
-              messages: [
-                { role: "system", content: agent.systemPrompt + extraContext },
-                { role: "user", content: finalQuery },
-              ],
-            }),
-          });
-          const d = await res.json();
-          await sendTelegramMessage(botToken, chatId, d.choices?.[0]?.message?.content ?? "Ниша не найдена.");
-          return;
         }
-
-        // Отправляем сообщение-анонс
-        const marketNames = reports.map(r => r.market === "wb" ? "WB" : "Ozon").join(" и ");
-        await sendTelegramMessage(botToken, chatId, `📊 Готовлю анализ ниши *${queryToUse}* (${marketNames}) — файл(ы) ниже 👇`);
-
-        // Для каждого маркета — отдельный Claude-запрос и отдельный HTML
-        for (const report of reports) {
-          const ctx = "\n\n" + formatMpstatsForTelegram(
-            { ...report.nicheData, market: report.market },
-            report.nicheName
-          );
-          const markdown = await generateNovaReport(agent, finalQuery, ctx);
-          const html = generateNovaHtmlReport(
-            markdown,
-            report.nicheName,
-            report.market,
-            report.nicheData.trends as Record<string, unknown>[]
-          );
-          await sendNovaHtmlReport(botToken, chatId, html, report.nicheName, report.market);
-        }
-
-        return; // Nova обработана — выходим
-
       } catch (e) {
         console.error("Nova MPStats TG error:", e);
-        await sendTelegramMessage(botToken, chatId, "Произошла ошибка при получении данных MPStats.");
-        return;
       }
     }
 
-    // ── Scout Lin ─────────────────────────────────────────────────────────────
     if (agentId === "scout-lin" && finalQuery) {
       const platform = detectPlatform(finalQuery);
       try {
@@ -910,13 +713,13 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
       } catch (e) { console.error("Search failed:", e); }
     }
 
-    // ── Все остальные агенты ──────────────────────────────────────────────────
+    // ── Запрос к Claude ───────────────────────────────────────────────────────
     const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
       method: "POST",
       headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-sonnet-4.6",
-        max_tokens: 1500,
+        max_tokens: agentId === "buyer-nova" ? 4000 : 1500,
         messages: [
           { role: "system", content: agent.systemPrompt + extraContext },
           { role: "user", content: finalQuery || "Проанализируй присланное фото" },
@@ -926,7 +729,68 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
 
     const data = await res.json();
     const response = data.choices?.[0]?.message?.content ?? "Не смог ответить, попробуй ещё раз.";
-    await sendTelegramMessage(botToken, chatId, response);
+
+    // ── Отправка ответа ───────────────────────────────────────────────────────
+    if (agentId === "buyer-nova" && novaSubjectName) {
+      const hasWb = wbNicheData !== null;
+      const hasOz = ozNicheData !== null;
+      const marketNames = [hasWb ? "WB" : "", hasOz ? "Ozon" : ""].filter(Boolean).join(" и ");
+
+      await sendTelegramMessage(botToken, chatId, `📊 Анализ ниши *${novaSubjectName}* (${marketNames}) — файл(ы) ниже 👇`);
+
+      if (hasWb && hasOz) {
+        // Два отдельных HTML-файла — сначала WB, потом Ozon
+        // WB — запрашиваем отдельный Claude-ответ только по WB данным
+        const wbCtx = "\n\n" + formatMpstatsForTelegram({ ...wbNicheData!, market: "wb" }, wbNicheName);
+        const wbRes = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4.6",
+            max_tokens: 4000,
+            messages: [
+              { role: "system", content: agent.systemPrompt + wbCtx },
+              { role: "user", content: finalQuery },
+            ],
+          }),
+        });
+        const wbData = await wbRes.json();
+        const wbResponse = wbData.choices?.[0]?.message?.content ?? "";
+        const wbHtml = generateNovaHtmlReport(wbResponse, wbNicheName, "wb", novaWbTrends);
+        await sendNovaHtmlReport(botToken, chatId, wbHtml, wbNicheName, "wb");
+
+        // Ozon
+        const ozCtx = "\n\n" + formatMpstatsForTelegram({ ...ozNicheData!, market: "oz" }, ozNicheName);
+        const ozRes = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4.6",
+            max_tokens: 4000,
+            messages: [
+              { role: "system", content: agent.systemPrompt + ozCtx },
+              { role: "user", content: finalQuery },
+            ],
+          }),
+        });
+        const ozData = await ozRes.json();
+        const ozResponse = ozData.choices?.[0]?.message?.content ?? "";
+        const ozHtml = generateNovaHtmlReport(ozResponse, ozNicheName, "oz", novaOzTrends);
+        await sendNovaHtmlReport(botToken, chatId, ozHtml, ozNicheName, "oz");
+
+      } else if (hasWb) {
+        const wbHtml = generateNovaHtmlReport(response, wbNicheName || novaSubjectName, "wb", novaWbTrends);
+        await sendNovaHtmlReport(botToken, chatId, wbHtml, wbNicheName || novaSubjectName, "wb");
+      } else if (hasOz) {
+        const ozHtml = generateNovaHtmlReport(response, ozNicheName || novaSubjectName, "oz", novaOzTrends);
+        await sendNovaHtmlReport(botToken, chatId, ozHtml, ozNicheName || novaSubjectName, "oz");
+      } else {
+        // MPStats не нашёл — просто текст от Claude
+        await sendTelegramMessage(botToken, chatId, response);
+      }
+    } else {
+      await sendTelegramMessage(botToken, chatId, response);
+    }
 
     if (ozonReportPeriod) {
       await sendOzonExcel(botToken, chatId, ozonReportPeriod.from, ozonReportPeriod.to);
