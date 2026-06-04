@@ -33,7 +33,7 @@ const SALARY_SCHEDULE: Record<number, { name: string; amount: number }[]> = {
   ],
 };
 
-const SALARY_RECIPIENT = 841565084;
+const SALARY_RECIPIENTS = [841565084, 48276079];
 
 async function sendSalaryReminder(token: string, day: number) {
   const salaries = SALARY_SCHEDULE[day];
@@ -44,7 +44,7 @@ async function sendSalaryReminder(token: string, day: number) {
     msg += `👤 *${s.name}* — ${s.amount.toLocaleString("ru-RU")} ₽\n`;
   }
   msg += `\n💳 *Итого к выплате: ${total.toLocaleString("ru-RU")} ₽*`;
-  await sendMessage(token, SALARY_RECIPIENT, msg);
+  for (const id of SALARY_RECIPIENTS) { await sendMessage(token, id, msg); }
 }
 
 export async function GET(req: Request) {
