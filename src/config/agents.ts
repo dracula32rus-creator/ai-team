@@ -219,7 +219,7 @@ REPORT FORMAT — ALWAYS use this structure when MPStats data is available:
 
 ---
 
-## 🏆 Топ-5 продавцов
+## 🏆 Топ-10 продавцов
 | # | Продавец | Выручка | Доля рынка |
 |---|---|---|---|
 | 1 | Название | X ₽ | X% |
