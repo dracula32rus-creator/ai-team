@@ -250,227 +250,54 @@ function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: st
   return ctx;
 }
 
-// ─── ИНТЕРАКТИВНЫЙ ГРАФИК ТРЕНДА ─────────────────────────────────────────────
-function buildInteractiveTrendChart(
-  trends: Record<string, unknown>[],
-  market: "wb" | "oz"
-): string {
-  if (!trends || trends.length < 2) return "";
-
-  // Логируем первую точку чтобы видеть реальные поля MPStats
-  console.log(`=== TREND [${market}] first point keys:`, Object.keys(trends[0]));
-  console.log(`=== TREND [${market}] first point:`, JSON.stringify(trends[0]));
-  console.log(`=== TREND [${market}] total points:`, trends.length);
-
-  const points = trends.map(t => ({
-    label:       String(t.label_date ?? t.date ?? ""),
-    revenue:     Number(t.revenue      ?? 0),
-    orders:      Number(t.sales        ?? t.orders_count ?? t.orders ?? 0),
-    buyouts:     Number(t.buyouts_count ?? t.buyouts     ?? 0),
-    buyouts_sum: Number(t.buyouts_revenue ?? t.buyouts_sum ?? t.product_revenue ?? 0),
-  }));
-
-  const dataJson = JSON.stringify(points);
-  const marketLabel = market === "wb" ? "Wildberries" : "Ozon";
-  const primaryColor = market === "wb" ? "#17BF50" : "#185FA5";
-  const secondColor  = market === "wb" ? "#4DF085"  : "#54A3E0";
-  const chartId = `tc_${market}`;
-
-  return `
-<div id="${chartId}_root" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:20px 22px;margin-bottom:16px;">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
-    <div>
-      <div style="font-size:16px;font-weight:700;color:#e8e8e8;">📈 Тренд ниши ${marketLabel} (4 года)</div>
-      <div style="font-size:12px;color:#666;margin-top:2px;">По месяцам · несколько метрик · наведи на точку</div>
-    </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;" id="${chartId}_tabs">
-      <button onclick="${chartId}_toggle('revenue',this)"     id="${chartId}_t_revenue"     class="${chartId}_tab" style="border-color:#17BF50;background:#17BF5022;color:#17BF50;">Сумма заказов</button>
-      <button onclick="${chartId}_toggle('orders',this)"      id="${chartId}_t_orders"      class="${chartId}_tab">Кол-во заказов</button>
-      <button onclick="${chartId}_toggle('buyouts',this)"     id="${chartId}_t_buyouts"     class="${chartId}_tab">Кол-во выкупов</button>
-      <button onclick="${chartId}_toggle('buyouts_sum',this)" id="${chartId}_t_buyouts_sum" class="${chartId}_tab">Сумма выкупов</button>
-    </div>
-  </div>
-  <style>
-    .${chartId}_tab{background:#222;border:1.5px solid #333;border-radius:7px;padding:5px 12px;font-size:12px;font-weight:600;color:#666;cursor:pointer;transition:all .15s;}
-    .${chartId}_tab:hover{border-color:#555;}
-  </style>
-  <div style="position:relative;" id="${chartId}_wrap">
-    <div id="${chartId}_tt" style="display:none;position:absolute;z-index:20;background:#0f0f0f;color:#e8e8e8;border:1px solid #333;border-radius:9px;padding:10px 14px;font-size:12px;line-height:1.8;pointer-events:none;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.5);"></div>
-    <div style="overflow-x:auto;" id="${chartId}_scroll">
-      <canvas id="${chartId}_canvas" style="display:block;cursor:crosshair;"></canvas>
-    </div>
-  </div>
-  <div id="${chartId}_legend" style="display:flex;gap:14px;margin-top:10px;font-size:12px;color:#666;flex-wrap:wrap;"></div>
-</div>
-<script>
-(function(){
-  var DATA=${dataJson};
-  var PRIMARY="${primaryColor}",SEC="${secondColor}";
-  var CID="${chartId}";
-  var MCOLORS={revenue:"#17BF50",orders:"#4A9EE0",buyouts:"#FF9800",buyouts_sum:"#E040FB"};
-  var MLINES={revenue:{w:2.5,dash:[]},orders:{w:2,dash:[6,3]},buyouts:{w:2,dash:[2,2]},buyouts_sum:{w:1.5,dash:[8,3,2,3]}};
-  var MLABELS={revenue:"Сумма заказов",orders:"Кол-во заказов",buyouts:"Кол-во выкупов",buyouts_sum:"Сумма выкупов"};
-  var active={revenue:true};
-  var canvas=document.getElementById(CID+"_canvas");
-  var tt=document.getElementById(CID+"_tt");
-  var leg=document.getElementById(CID+"_legend");
-  var scr=document.getElementById(CID+"_scroll");
-  var wrap=document.getElementById(CID+"_wrap");
-  var ctx=canvas.getContext("2d");
-  var PAD={top:24,right:24,bottom:58,left:80},H=260;
-  function fmtV(v,m){
-    if(m==="revenue"||m==="buyouts_sum"){if(v>=1e9)return(v/1e9).toFixed(1)+" млрд ₽";if(v>=1e6)return(v/1e6).toFixed(1)+" млн ₽";if(v>=1e3)return(v/1e3).toFixed(0)+" тыс ₽";return v.toLocaleString("ru-RU")+" ₽";}
-    else{if(v>=1e6)return(v/1e6).toFixed(1)+" млн шт";if(v>=1e3)return(v/1e3).toFixed(0)+" тыс шт";return v.toLocaleString("ru-RU")+" шт";}
-  }
-  function fmtA(v,m){
-    if(m==="revenue"||m==="buyouts_sum"){if(v>=1e9)return(v/1e9).toFixed(1)+"млрд";if(v>=1e6)return(v/1e6).toFixed(1)+"млн";if(v>=1e3)return(v/1e3).toFixed(0)+"тыс";return v.toFixed(0);}
-    else{if(v>=1e6)return(v/1e6).toFixed(1)+"млн";if(v>=1e3)return(v/1e3).toFixed(0)+"тыс";return v.toFixed(0);}
-  }
-  function getActive(){return Object.keys(active).filter(function(k){return active[k];});}
-  function minmaxFor(met){
-    var lo=Infinity,hi=0;
-    for(var i=0;i<DATA.length;i++){var v=Number(DATA[i][met]||0);if(v>hi)hi=v;if(v<lo)lo=v;}
-    if(hi===0)hi=1;if(lo===Infinity)lo=0;return{lo:lo,hi:hi};
-  }
-  function minmax(){
-    // Глобальный minmax только для совместимости — используем нормализацию
-    return{lo:0,hi:1};
-  }
-  function draw(){
-    var N=DATA.length,colW=Math.max(16,Math.min(36,Math.floor(520/N)));
-    var W=PAD.left+N*colW+PAD.right;
-    canvas.width=W;canvas.height=H;canvas.style.width=W+"px";canvas.style.height=H+"px";
-    ctx.clearRect(0,0,W,H);
-    var chartH=H-PAD.top-PAD.bottom;
-    function toYnorm(norm){return PAD.top+chartH-(norm)*chartH;}
-    function toX(i){return PAD.left+i*colW+colW/2;}
-    var ms=getActive(),pm=ms[0]||"revenue";
-    var pmm=minmaxFor(pm);
-    function toY(v){return toYnorm((v-pmm.lo)/(pmm.hi-pmm.lo||1));}
-    ctx.font="11px -apple-system,sans-serif";
-    for(var gi=0;gi<=4;gi++){
-      var gy=toYnorm(gi/4);
-      ctx.strokeStyle="rgba(255,255,255,0.06)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD.left,gy);ctx.lineTo(W-PAD.right,gy);ctx.stroke();
-      ctx.fillStyle="#555";ctx.textAlign="right";
-      ctx.fillText(fmtA(pmm.lo+(gi/4)*(pmm.hi-pmm.lo),pm),PAD.left-6,gy+4);
-    }
-    var prevYr="";
-    for(var xi=0;xi<N;xi++){
-      var lbl=DATA[xi].label,yr=lbl.slice(0,4),mo=lbl.slice(5),xx=toX(xi);
-      if(yr!==prevYr){
-        ctx.fillStyle="rgba(255,255,255,0.03)";ctx.fillRect(xx-colW/2,PAD.top,colW,chartH);
-        ctx.font="bold 11px -apple-system,sans-serif";ctx.fillStyle=PRIMARY;ctx.textAlign="center";ctx.fillText(yr,xx,H-PAD.bottom+30);
-        prevYr=yr;
-      }
-      if(xi%3===0){ctx.font="10px -apple-system,sans-serif";ctx.fillStyle="#555";ctx.textAlign="center";ctx.fillText(mo,xx,H-PAD.bottom+16);}
-    }
-    for(var mi=0;mi<ms.length;mi++){
-      var met=ms[mi],color=MCOLORS[met];
-      var r=parseInt(color.slice(1,3),16),g=parseInt(color.slice(3,5),16),b=parseInt(color.slice(5,7),16);
-      var mm2=minmaxFor(met),lo2=mm2.lo,range2=mm2.hi-mm2.lo||1;
-      var pts=DATA.map(function(d,i){return{x:toX(i),y:toYnorm((Number(d[met]||0)-lo2)/range2)};});
-      // area
-      ctx.beginPath();ctx.moveTo(pts[0].x,toY(lo));ctx.lineTo(pts[0].x,pts[0].y);
-      for(var ci=0;ci<pts.length-1;ci++){
-        var p0=ci>0?pts[ci-1]:pts[ci],p1=pts[ci],p2=pts[ci+1],p3=ci<pts.length-2?pts[ci+2]:pts[ci+1];
-        ctx.bezierCurveTo(p1.x+(p2.x-p0.x)/4,p1.y+(p2.y-p0.y)/4,p2.x-(p3.x-p1.x)/4,p2.y-(p3.y-p1.y)/4,p2.x,p2.y);
-      }
-      ctx.lineTo(pts[pts.length-1].x,toY(lo));ctx.closePath();
-      ctx.fillStyle="rgba("+r+","+g+","+b+","+(ms.length>1?0.04:0.08)+")";ctx.fill();
-      // line
-      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
-      for(var li=0;li<pts.length-1;li++){
-        var lp0=li>0?pts[li-1]:pts[li],lp1=pts[li],lp2=pts[li+1],lp3=li<pts.length-2?pts[li+2]:pts[li+1];
-        ctx.bezierCurveTo(lp1.x+(lp2.x-lp0.x)/4,lp1.y+(lp2.y-lp0.y)/4,lp2.x-(lp3.x-lp1.x)/4,lp2.y-(lp3.y-lp1.y)/4,lp2.x,lp2.y);
-      }
-      var ls=MLINES[met]||{w:2,dash:[]};
-      ctx.strokeStyle=color;ctx.lineWidth=ls.w;ctx.setLineDash(ls.dash);ctx.lineJoin="round";ctx.lineCap="round";ctx.stroke();
-      ctx.setLineDash([]);
-      // dots
-      for(var di=0;di<pts.length;di++){
-        if(di%3!==0&&di!==0&&di!==pts.length-1)continue;
-        ctx.beginPath();ctx.arc(pts[di].x,pts[di].y,3,0,Math.PI*2);
-        ctx.fillStyle=color;ctx.fill();ctx.strokeStyle="#1a1a1a";ctx.lineWidth=1.5;ctx.stroke();
-      }
-    }
-    leg.innerHTML=ms.map(function(m){return'<div style="display:flex;align-items:center;gap:5px;"><span style="width:14px;height:3px;border-radius:2px;background:'+MCOLORS[m]+';display:inline-block;"></span><span>'+MLABELS[m]+'</span></div>';}).join("");
-    canvas._N=N;canvas._colW=colW;canvas._toY=toY;canvas._toYnorm=toYnorm;canvas._minmaxFor=minmaxFor;canvas._toX=toX;canvas._chartH=chartH;
-  }
-  function onMove(e){
-    if(!canvas._N)return;
-    var sx=scr.scrollLeft;
-    var wrapRect=wrap.getBoundingClientRect();
-    var mx=(e.clientX-wrapRect.left)+sx;
-    var idx=Math.round((mx-PAD.left-canvas._colW/2)/canvas._colW);
-    if(idx<0||idx>=canvas._N){tt.style.display="none";return;}
-    var ms=getActive();
-    var html='<div style="font-weight:700;color:'+PRIMARY+';margin-bottom:5px;font-size:13px;">'+DATA[idx].label+'</div>';
-    for(var i=0;i<ms.length;i++){
-      var v=Number(DATA[idx][ms[i]]||0);
-      html+='<div style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:'+MCOLORS[ms[i]]+';flex-shrink:0;"></span><span style="color:#888;">'+MLABELS[ms[i]]+':</span> <span style="font-weight:600;color:#e8e8e8;">'+fmtV(v,ms[i])+'</span></div>';
-    }
-    tt.innerHTML=html;
-    tt.style.left="-9999px"; tt.style.top="0"; tt.style.display="block";
-    var ttW=tt.offsetWidth||200;
-    var ttH=tt.offsetHeight||90;
-    var xInWrap=PAD.left+idx*canvas._colW+canvas._colW/2-sx;
-    var wrapW=wrapRect.width;
-    var left=xInWrap+16;
-    if(left+ttW>wrapW-6) left=xInWrap-ttW-16;
-    if(left<4) left=4;
-    var pm=ms[0]||"revenue";
-    var pmm2=canvas._minmaxFor(pm);
-    var ptY=canvas._toYnorm((Number(DATA[idx][pm]||0)-pmm2.lo)/(pmm2.hi-pmm2.lo||1));
-    var top=ptY-ttH-10;
-    if(top<4) top=ptY+16;
-    if(top+ttH>H-6) top=Math.max(4,H-ttH-6);
-    tt.style.left=left+"px";
-    tt.style.top=top+"px";
-  }
-  canvas.addEventListener("mousemove",onMove);
-  canvas.addEventListener("mouseleave",function(){tt.style.display="none";});
-  window[CID+"_toggle"]=function(met,btn){
-    var keys=Object.keys(active).filter(function(k){return active[k];});
-    if(active[met]){if(keys.length===1)return;active[met]=false;btn.style.borderColor="";btn.style.background="";btn.style.color="";}
-    else{active[met]=true;btn.style.borderColor=MCOLORS[met];btn.style.background=MCOLORS[met]+"22";btn.style.color=MCOLORS[met];}
-    draw();
-  };
-  draw();
-})();
-</script>`;
+function buildTrendSvg(trends: Record<string, unknown>[]): string {
+  if (trends.length < 2) return "";
+  const revenues = trends.map(t => Number(t.revenue ?? 0));
+  const maxRev = Math.max(...revenues);
+  const minRev = Math.min(...revenues);
+  const range = maxRev - minRev || 1;
+  const W = 700, H = 220, padL = 70, padR = 20, padT = 20, padB = 45;
+  const chartW = W - padL - padR, chartH = H - padT - padB;
+  const points = trends.map((t, i) => {
+    const x = padL + (i / (trends.length - 1)) * chartW;
+    const y = padT + chartH - ((Number(t.revenue ?? 0) - minRev) / range) * chartH;
+    return { x, y, revenue: Number(t.revenue ?? 0), label: String(t.label_date ?? "") };
+  });
+  const polyline = points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const areaPoints = `${padL},${padT + chartH} ` + points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ") + ` ${padL + chartW},${padT + chartH}`;
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(ratio => {
+    const y = padT + chartH - ratio * chartH;
+    const val = ((minRev + ratio * range) / 1_000_000).toFixed(1);
+    return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${padL + chartW}" y2="${y.toFixed(1)}" stroke="#2a2a2a" stroke-width="1"/>
+<text x="${(padL - 6).toFixed(1)}" y="${(y + 4).toFixed(1)}" fill="#666" font-size="11" text-anchor="end">${val}м</text>`;
+  }).join("\n");
+  const labels = points.filter((_, i) => i % 3 === 0 || i === points.length - 1).map(p =>
+    `<text x="${p.x.toFixed(1)}" y="${(padT + chartH + 20).toFixed(1)}" fill="#888" font-size="11" text-anchor="middle">${p.label}</text>`
+  ).join("\n");
+  const dots = points.map(p =>
+    `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="#ff6b3d" stroke="#1a1a1a" stroke-width="2"><title>${p.label}: ${(p.revenue/1_000_000).toFixed(1)}м ₽</title></circle>`
+  ).join("\n");
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px;height:auto;display:block">
+  <defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#ff6b3d" stop-opacity="0.25"/>
+    <stop offset="100%" stop-color="#ff6b3d" stop-opacity="0"/>
+  </linearGradient></defs>
+  ${gridLines}
+  <polygon points="${areaPoints}" fill="url(#areaGrad)"/>
+  <polyline points="${polyline}" fill="none" stroke="#ff6b3d" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+  ${dots}${labels}
+</svg>`;
 }
-// ─────────────────────────────────────────────────────────────────────────────
 
-function generateNovaHtmlReport(
-  nicheName: string,
-  wbMarkdown: string,
-  ozMarkdown: string,
-  wbTrends: Record<string, unknown>[],
-  ozTrends: Record<string, unknown>[]
-): string {
+function generateNovaHtmlReport(markdown: string, nicheName: string, trendsWb?: Record<string, unknown>[], trendsOz?: Record<string, unknown>[]): string {
   const now = new Date();
   const dateStr = now.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
-  const hasWbContent = wbMarkdown.length > 0;
-  const hasOzContent = ozMarkdown.length > 0;
-  const accentColor = "#ff6b3d";
-  const wbChartHtml = wbTrends.length >= 2 ? buildInteractiveTrendChart(wbTrends, "wb") : "";
-  const ozChartHtml = ozTrends.length >= 2 ? buildInteractiveTrendChart(ozTrends, "oz") : "";
-
-  const wbSection = hasWbContent ? `
-    <div class="market-header wb-header">
-      <span class="market-badge">🛍 Wildberries</span>
-    </div>
-    ${wbChartHtml}
-    <div class="market-content">${convertMarkdownToHtml(wbMarkdown)}</div>
-  ` : "";
-
-  const ozSection = hasOzContent ? `
-    <div class="market-header oz-header">
-      <span class="market-badge">🟠 Ozon</span>
-    </div>
-    ${ozChartHtml}
-    <div class="market-content">${convertMarkdownToHtml(ozMarkdown)}</div>
-  ` : "";
+  const wbChart = trendsWb && trendsWb.length >= 2 ? buildTrendSvg(trendsWb) : "";
+  const ozChart = trendsOz && trendsOz.length >= 2 ? buildTrendSvg(trendsOz) : "";
+  const chartsHtml = [
+    wbChart ? `<div class="trend-card"><h2>📈 Тренд выручки WB</h2><div class="svg-wrap">${wbChart}</div></div>` : "",
+    ozChart ? `<div class="trend-card"><h2>📈 Тренд выручки Ozon</h2><div class="svg-wrap">${ozChart}</div></div>` : "",
+  ].join("");
 
   return `<!DOCTYPE html>
 <html lang="ru">
@@ -480,17 +307,13 @@ function generateNovaHtmlReport(
 <title>Анализ ниши: ${nicheName}</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e8e8e8; padding: 24px; max-width: 960px; margin: 0 auto; }
-  .header { background: linear-gradient(135deg, #1a1a2e, #16213e); border: 1px solid #2a2a3e; border-radius: 16px; padding: 28px 32px; margin-bottom: 20px; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e8e8e8; padding: 24px; max-width: 900px; margin: 0 auto; }
+  .header { background: linear-gradient(135deg, #993C1D, #c4522a); border-radius: 16px; padding: 28px 32px; margin-bottom: 20px; }
   .header h1 { font-size: 26px; font-weight: 700; color: white; margin-bottom: 6px; }
-  .header .meta { font-size: 13px; color: rgba(255,255,255,0.5); }
-  .market-header { border-radius: 10px; padding: 14px 20px; margin: 24px 0 14px; display: flex; align-items: center; gap: 10px; }
-  .wb-header { background: linear-gradient(135deg, #993C1D, #c4522a); }
-  .oz-header { background: linear-gradient(135deg, #0d3f6e, #185FA5); }
-  .market-badge { font-size: 16px; font-weight: 700; color: white; }
-  .market-divider { border: none; border-top: 2px solid #2a2a2a; margin: 32px 0; }
-  .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 22px; margin-bottom: 14px; }
-  h2 { font-size: 17px; font-weight: 600; color: ${accentColor}; margin-bottom: 14px; border-bottom: 1px solid #2a2a2a; padding-bottom: 8px; }
+  .header .meta { font-size: 13px; color: rgba(255,255,255,0.7); }
+  .card, .trend-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 22px; margin-bottom: 14px; }
+  .svg-wrap { overflow-x: auto; margin-top: 8px; }
+  h2 { font-size: 17px; font-weight: 600; color: #ff6b3d; margin-bottom: 14px; border-bottom: 1px solid #2a2a2a; padding-bottom: 8px; }
   h3 { font-size: 14px; font-weight: 600; color: #e8e8e8; margin: 14px 0 8px; }
   table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
   th { background: #222; color: #888; font-weight: 500; padding: 9px 12px; text-align: left; border-bottom: 1px solid #333; }
@@ -520,9 +343,8 @@ function generateNovaHtmlReport(
   <h1>📊 ${nicheName}</h1>
   <div class="meta">Анализ ниши MPStats · ${dateStr}</div>
 </div>
-${wbSection}
-${hasWbContent && hasOzContent ? '<hr class="market-divider">' : ""}
-${ozSection}
+${chartsHtml}
+<div id="content">${convertMarkdownToHtml(markdown)}</div>
 <div class="footer">Powered by MPStats · AI Team WB/Ozon · ${dateStr}</div>
 </body>
 </html>`;
@@ -535,47 +357,31 @@ function convertMarkdownToHtml(md: string): string {
   let inCard = false;
   let tableRows = "";
   let tableHeader = "";
-
   for (const line of lines) {
     if (line.startsWith("## ")) {
       if (inTable) { html += buildTable(tableHeader, tableRows); inTable = false; tableRows = ""; tableHeader = ""; }
       if (inCard) { html += "</div>"; inCard = false; }
-      html += `<div class="card"><h2>${line.replace("## ", "")}</h2>`;
-      inCard = true;
-      continue;
+      html += `<div class="card"><h2>${line.replace("## ", "")}</h2>`; inCard = true; continue;
     }
     if (line.startsWith("### ")) {
       if (inTable) { html += buildTable(tableHeader, tableRows); inTable = false; tableRows = ""; tableHeader = ""; }
-      html += `<h3>${line.replace("### ", "")}</h3>`;
-      continue;
+      html += `<h3>${line.replace("### ", "")}</h3>`; continue;
     }
     if (line.startsWith("|")) {
       if (line.includes("---")) continue;
-      if (!inTable) { inTable = true; tableHeader = line; }
-      else tableRows += line + "\n";
+      if (!inTable) { inTable = true; tableHeader = line; } else tableRows += line + "\n";
       continue;
     } else if (inTable) {
-      html += buildTable(tableHeader, tableRows);
-      inTable = false; tableRows = ""; tableHeader = "";
+      html += buildTable(tableHeader, tableRows); inTable = false; tableRows = ""; tableHeader = "";
     }
-    if (line.includes("ЗАХОДИМ") && !line.includes("НЕ ЗАХОДИМ")) {
-      html += `<div class="verdict"><h3>✅ ЗАХОДИМ 🔥</h3><p>${formatInline(line)}</p></div>`;
-      continue;
-    }
-    if (line.includes("НЕ ЗАХОДИМ")) {
-      html += `<div class="verdict bad"><h3>🚫 НЕ ЗАХОДИМ</h3><p>${formatInline(line)}</p></div>`;
-      continue;
-    }
-    if (line.includes("ДУМАЕМ")) {
-      html += `<div class="verdict neutral"><h3>🤔 ДУМАЕМ</h3><p>${formatInline(line)}</p></div>`;
-      continue;
-    }
+    if (line.includes("ЗАХОДИМ") && !line.includes("НЕ ЗАХОДИМ")) { html += `<div class="verdict"><h3>✅ ЗАХОДИМ 🔥</h3><p>${formatInline(line)}</p></div>`; continue; }
+    if (line.includes("НЕ ЗАХОДИМ")) { html += `<div class="verdict bad"><h3>🚫 НЕ ЗАХОДИМ</h3><p>${formatInline(line)}</p></div>`; continue; }
+    if (line.includes("ДУМАЕМ")) { html += `<div class="verdict neutral"><h3>🤔 ДУМАЕМ</h3><p>${formatInline(line)}</p></div>`; continue; }
     if (line.startsWith("> ")) { html += `<blockquote>${formatInline(line.replace("> ", ""))}</blockquote>`; continue; }
     if (line.startsWith("- ") || line.startsWith("* ")) { html += `<ul><li>${formatInline(line.replace(/^[-*] /, ""))}</li></ul>`; continue; }
     if (line.startsWith("---")) continue;
     if (line.trim()) html += `<p>${formatInline(line)}</p>`;
   }
-
   if (inTable) html += buildTable(tableHeader, tableRows);
   if (inCard) html += "</div>";
   return html;
@@ -599,12 +405,7 @@ function formatInline(text: string): string {
     .replace(/🟡/g, '<span class="badge badge-yellow">🟡 Средне</span>');
 }
 
-async function sendNovaHtmlReport(
-  botToken: string,
-  chatId: number,
-  html: string,
-  nicheName: string
-): Promise<void> {
+async function sendNovaHtmlReport(botToken: string, chatId: number, html: string, nicheName: string): Promise<void> {
   try {
     const fileName = `nova-${nicheName.replace(/[^а-яёa-z0-9]/gi, "-").toLowerCase()}-${Date.now()}.html`;
     const buffer = Buffer.from(html, "utf-8");
@@ -621,17 +422,13 @@ async function sendNovaHtmlReport(
 export async function handleTelegramMessage(update: TelegramUpdate, agentId: string, botToken: string) {
   const message = update.message;
   if (!message) return;
-
   const userText = message.text ?? message.caption ?? "";
   const hasPhoto = message.photo && message.photo.length > 0;
   if (!userText && !hasPhoto) return;
-
   const chatId = message.chat.id;
-
   const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
   const me = await meRes.json();
   const botUsername = me.result?.username;
-
   const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
   if (isGroup && botUsername) {
     const mention = `@${botUsername}`.toLowerCase();
@@ -639,19 +436,14 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
     const repliedToBot = message.reply_to_message?.from?.username === botUsername;
     if (!mentioned && !repliedToBot) return;
   }
-
   if (userText === "/start" || userText.startsWith("/start@")) {
     const agent = getAgent(agentId);
     await sendTelegramMessage(botToken, chatId, agent?.greeting ?? "Привет!");
     return;
   }
-
   const agent = getAgent(agentId);
   if (!agent) { await sendTelegramMessage(botToken, chatId, "Агент не найден"); return; }
-
-  const cleanText = botUsername
-    ? userText.replace(new RegExp(`@${botUsername}`, "gi"), "").trim()
-    : userText;
+  const cleanText = botUsername ? userText.replace(new RegExp(`@${botUsername}`, "gi"), "").trim() : userText;
 
   try {
     await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
@@ -673,11 +465,6 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
     let novaSubjectName = "";
     let novaWbTrends: Record<string, unknown>[] = [];
     let novaOzTrends: Record<string, unknown>[] = [];
-    // Для двойного отчёта — данные по каждому маркету
-    let wbNicheData: Awaited<ReturnType<typeof getWbNicheData>> | null = null;
-    let ozNicheData: Awaited<ReturnType<typeof getOzNicheData>> | null = null;
-    let wbNicheName = "";
-    let ozNicheName = "";
 
     if (agentId === "cfo-finn" && needsOzonReport(finalQuery)) {
       try {
@@ -703,48 +490,37 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
       try {
         const queryToUse = await extractSearchKeyword(finalQuery);
         console.log("=== Nova TG: original:", finalQuery, "| keyword:", queryToUse);
-
         const market = detectMarket(finalQuery);
         let subjects: { id: unknown; name: unknown; market: string }[] = [];
-
         if (market === "wb") {
           subjects = await searchWbSubjects(queryToUse);
         } else if (market === "oz") {
           subjects = await searchOzNiches(queryToUse);
         } else {
-          // both — параллельно
-          const [wb, oz] = await Promise.all([
-            searchWbSubjects(queryToUse),
-            searchOzNiches(queryToUse),
-          ]);
+          const [wb, oz] = await Promise.all([searchWbSubjects(queryToUse), searchOzNiches(queryToUse)]);
           subjects = [...wb.slice(0, 1), ...oz.slice(0, 1)];
         }
-
         console.log("=== Nova TG: found:", subjects.length, "subjects for market:", market);
-
         if (subjects.length > 0) {
           novaSubjectName = queryToUse;
-
-          // Грузим данные для каждого найденного маркета
-          for (const subj of subjects) {
-            if (subj.market === "wb") {
-              wbNicheData = await getWbNicheData(Number(subj.id));
-              wbNicheName = String(subj.name) || queryToUse;
-              novaWbTrends = wbNicheData.trends as Record<string, unknown>[];
-              extraContext += "\n\n" + formatMpstatsForTelegram({ ...wbNicheData, market: "wb" }, wbNicheName);
-            } else {
-              ozNicheData = await getOzNicheData(Number(subj.id));
-              ozNicheName = String(subj.name) || queryToUse;
-              novaOzTrends = ozNicheData.trends as Record<string, unknown>[];
-              extraContext += "\n\n" + formatMpstatsForTelegram({ ...ozNicheData, market: "oz" }, ozNicheName);
+          const first = subjects[0];
+          const nicheData = first.market === "wb" ? await getWbNicheData(Number(first.id)) : await getOzNicheData(Number(first.id));
+          if (first.market === "wb") novaWbTrends = nicheData.trends as Record<string, unknown>[];
+          else novaOzTrends = nicheData.trends as Record<string, unknown>[];
+          extraContext = "\n\n" + formatMpstatsForTelegram({ ...nicheData, market: first.market }, String(first.name));
+          if (market === "both" && subjects.length > 1) {
+            const second = subjects.find(s => s.market !== first.market);
+            if (second) {
+              const secondData = second.market === "wb" ? await getWbNicheData(Number(second.id)) : await getOzNicheData(Number(second.id));
+              if (second.market === "wb") novaWbTrends = secondData.trends as Record<string, unknown>[];
+              else novaOzTrends = secondData.trends as Record<string, unknown>[];
+              extraContext += "\n\n" + formatMpstatsForTelegram({ ...secondData, market: second.market }, String(second.name));
             }
           }
         } else {
           extraContext = `\n\n[MPStats не нашла нишу по запросу "${queryToUse}". Попроси написать конкретное название товара.]`;
         }
-      } catch (e) {
-        console.error("Nova MPStats TG error:", e);
-      }
+      } catch (e) { console.error("Nova MPStats TG error:", e); }
     }
 
     if (agentId === "scout-lin" && finalQuery) {
@@ -761,76 +537,28 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
       } catch (e) { console.error("Search failed:", e); }
     }
 
-    // ── Запрос к Claude + отправка ──────────────────────────────────────────────
-    const hasWb = wbNicheData !== null;
-    const hasOz = ozNicheData !== null;
+    const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4.6",
+        max_tokens: agentId === "buyer-nova" ? 4000 : 1500,
+        messages: [
+          { role: "system", content: agent.systemPrompt + extraContext },
+          { role: "user", content: finalQuery || "Проанализируй присланное фото" },
+        ],
+      }),
+    });
+
+    const data = await res.json();
+    const response = data.choices?.[0]?.message?.content ?? "Не смог ответить, попробуй ещё раз.";
 
     if (agentId === "buyer-nova" && novaSubjectName) {
-      if (!hasWb && !hasOz) {
-        // MPStats не нашёл ничего — текстовый ответ
-        const r = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4.6", max_tokens: 1000,
-            messages: [
-              { role: "system", content: agent!.systemPrompt + extraContext },
-              { role: "user", content: finalQuery },
-            ],
-          }),
-        });
-        const d = await r.json();
-        await sendTelegramMessage(botToken, chatId, d.choices?.[0]?.message?.content ?? "Ниша не найдена.");
-      } else {
-        // Один Claude-запрос — весь контекст (WB + OZ если есть)
-        const marketNames = [hasWb ? "WB" : "", hasOz ? "Ozon" : ""].filter(Boolean).join(" и ");
-        await sendTelegramMessage(botToken, chatId, `📊 Смотрю нишу *${novaSubjectName}* (${marketNames}) — отчёт ниже 👇`);
-
-        async function claudeReq(ctx: string): Promise<string> {
-          const r = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: "claude-sonnet-4.6", max_tokens: 4000,
-              messages: [
-                { role: "system", content: agent!.systemPrompt + ctx },
-                { role: "user", content: finalQuery },
-              ],
-            }),
-          });
-          const d = await r.json();
-          return d.choices?.[0]?.message?.content ?? "";
-        }
-
-        // Генерируем markdown для каждого маркета отдельно, но шлём ОДИН файл
-        const wbMarkdown = hasWb
-          ? await claudeReq("\n\n" + formatMpstatsForTelegram({ ...wbNicheData!, market: "wb" }, wbNicheName))
-          : "";
-        const ozMarkdown = hasOz
-          ? await claudeReq("\n\n" + formatMpstatsForTelegram({ ...ozNicheData!, market: "oz" }, ozNicheName))
-          : "";
-
-        const reportName = novaSubjectName;
-        const html = generateNovaHtmlReport(reportName, wbMarkdown, ozMarkdown, novaWbTrends, novaOzTrends);
-        await sendNovaHtmlReport(botToken, chatId, html, reportName);
-      }
-
+      const shortMsg = `📊 Анализ ниши *${novaSubjectName}* готов — смотри файл ниже 👇`;
+      await sendTelegramMessage(botToken, chatId, shortMsg);
+      const html = generateNovaHtmlReport(response, novaSubjectName, novaWbTrends, novaOzTrends);
+      await sendNovaHtmlReport(botToken, chatId, html, novaSubjectName);
     } else {
-      // Все остальные агенты — обычный Claude запрос
-      const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4.6",
-          max_tokens: 1500,
-          messages: [
-            { role: "system", content: agent!.systemPrompt + extraContext },
-            { role: "user", content: finalQuery || "Проанализируй присланное фото" },
-          ],
-        }),
-      });
-      const data = await res.json();
-      const response = data.choices?.[0]?.message?.content ?? "Не смог ответить, попробуй ещё раз.";
       await sendTelegramMessage(botToken, chatId, response);
     }
 
@@ -868,7 +596,6 @@ async function sendTelegramMessage(token: string, chatId: number, text: string) 
 function extractExpenseData(text: string) {
   const amountMatch = text.match(/(\d[\d\s,]*(?:\.\d+)?)\s*([кkтtмm]{1,2})?[\s]*(?:р(?:уб)?\.?|₽)?/i);
   if (!amountMatch || !amountMatch[1]) return null;
-
   const dateMatch = text.match(/(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?/);
   let date: string;
   if (dateMatch) {
@@ -879,14 +606,12 @@ function extractExpenseData(text: string) {
   } else {
     date = new Date().toLocaleDateString("ru-RU");
   }
-
   let amount = parseFloat(amountMatch[1].replace(/[\s,]/g, ""));
   const suffix = amountMatch[2]?.toLowerCase() ?? "";
   if (suffix === "кк" || suffix === "kk") amount *= 1_000_000;
   else if (suffix === "к" || suffix === "k" || suffix === "т" || suffix === "t") amount *= 1_000;
   else if (suffix === "м" || suffix === "m") amount *= 1_000_000;
   if (isNaN(amount) || amount <= 0) return null;
-
   const t = text.toLowerCase();
   let category = "прочее";
   if (t.match(/зп|зарплат|оклад|выплат/)) category = "зарплата";
@@ -898,6 +623,5 @@ function extractExpenseData(text: string) {
   else if (t.match(/курьер|вб|wb|озон|ozon|яндекс|сдэк|cdek|доставк/)) category = "доставка";
   else if (t.match(/бартер/)) category = "бартеры";
   else if (t.match(/реклам|блогер|маркетинг/)) category = "реклама";
-
   return { date, amount: String(Math.round(amount)), category, description: text };
 }
