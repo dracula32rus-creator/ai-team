@@ -33,7 +33,7 @@ const SALARY_SCHEDULE: Record<number, { name: string; amount: number }[]> = {
   ],
 };
 
-const SALARY_RECIPIENT = "@EviiilZues";
+const SALARY_RECIPIENT = 841565084;
 
 async function sendSalaryReminder(token: string, day: number) {
   const salaries = SALARY_SCHEDULE[day];
