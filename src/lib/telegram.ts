@@ -257,12 +257,17 @@ function buildInteractiveTrendChart(
 ): string {
   if (!trends || trends.length < 2) return "";
 
+  // Логируем первую точку чтобы видеть реальные поля MPStats
+  console.log(`=== TREND [${market}] first point keys:`, Object.keys(trends[0]));
+  console.log(`=== TREND [${market}] first point:`, JSON.stringify(trends[0]));
+  console.log(`=== TREND [${market}] total points:`, trends.length);
+
   const points = trends.map(t => ({
-    label: String(t.label_date ?? t.date ?? ""),
-    revenue:     Number(t.revenue      ?? t.orders_sum     ?? 0),
-    orders:      Number(t.orders       ?? t.purchases      ?? 0),
-    buyouts:     Number(t.buyouts      ?? t.buyouts_count  ?? 0),
-    buyouts_sum: Number(t.buyouts_sum  ?? t.buyout_revenue ?? t.revenue_buyouts ?? 0),
+    label:       String(t.label_date ?? t.date ?? t.period ?? ""),
+    revenue:     Number(t.revenue      ?? t.orders_revenue  ?? t.orders_sum    ?? 0),
+    orders:      Number(t.orders_count ?? t.orders          ?? t.purchases     ?? t.items_count ?? 0),
+    buyouts:     Number(t.buyouts_count ?? t.buyouts        ?? t.buyout_count  ?? 0),
+    buyouts_sum: Number(t.buyouts_revenue ?? t.buyouts_sum  ?? t.buyout_revenue ?? t.revenue_buyouts ?? 0),
   }));
 
   const dataJson = JSON.stringify(points);
@@ -309,6 +314,7 @@ function buildInteractiveTrendChart(
   var tt=document.getElementById(CID+"_tt");
   var leg=document.getElementById(CID+"_legend");
   var scr=document.getElementById(CID+"_scroll");
+  var wrap=document.getElementById(CID+"_wrap");
   var ctx=canvas.getContext("2d");
   var PAD={top:24,right:24,bottom:58,left:80},H=260;
   function fmtV(v,m){
@@ -381,23 +387,33 @@ function buildInteractiveTrendChart(
   }
   function onMove(e){
     if(!canvas._N)return;
-    var rect=canvas.getBoundingClientRect(),sx=scr.scrollLeft;
-    var mx=(e.clientX-rect.left)+sx;
+    var sx=scr.scrollLeft;
+    var wrapRect=wrap.getBoundingClientRect();
+    var mx=(e.clientX-wrapRect.left)+sx;
     var idx=Math.round((mx-PAD.left-canvas._colW/2)/canvas._colW);
     if(idx<0||idx>=canvas._N){tt.style.display="none";return;}
-    var ms=getActive(),html='<div style="font-weight:700;color:'+PRIMARY+';margin-bottom:5px;">'+DATA[idx].label+'</div>';
+    var ms=getActive();
+    var html='<div style="font-weight:700;color:'+PRIMARY+';margin-bottom:5px;font-size:13px;">'+DATA[idx].label+'</div>';
     for(var i=0;i<ms.length;i++){
       var v=Number(DATA[idx][ms[i]]||0);
-      html+='<div style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:'+MCOLORS[ms[i]]+';flex-shrink:0;"></span><span style="color:#888;">'+MLABELS[ms[i]]+':</span> <span style="font-weight:600;">'+fmtV(v,ms[i])+'</span></div>';
+      html+='<div style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:'+MCOLORS[ms[i]]+';flex-shrink:0;"></span><span style="color:#888;">'+MLABELS[ms[i]]+':</span> <span style="font-weight:600;color:#e8e8e8;">'+fmtV(v,ms[i])+'</span></div>';
     }
-    tt.innerHTML=html;tt.style.display="block";
-    var ttW=tt.offsetWidth||180,visW=scr.clientWidth;
-    var xScr=PAD.left+idx*canvas._colW+canvas._colW/2-sx;
-    var left=xScr+14;if(left+ttW>visW-8)left=xScr-ttW-14;if(left<4)left=4;
-    var pm=ms[0]||"revenue",ptY=canvas._toY(Number(DATA[idx][pm]||0));
-    var ttH=tt.offsetHeight||80,top=Math.max(4,ptY-ttH-10);
-    if(top+ttH>H-PAD.bottom-10)top=Math.max(4,ptY+14);
-    tt.style.left=left+"px";tt.style.top=top+"px";
+    tt.innerHTML=html;
+    tt.style.left="-9999px"; tt.style.top="0"; tt.style.display="block";
+    var ttW=tt.offsetWidth||200;
+    var ttH=tt.offsetHeight||90;
+    var xInWrap=PAD.left+idx*canvas._colW+canvas._colW/2-sx;
+    var wrapW=wrapRect.width;
+    var left=xInWrap+16;
+    if(left+ttW>wrapW-6) left=xInWrap-ttW-16;
+    if(left<4) left=4;
+    var pm=ms[0]||"revenue";
+    var ptY=canvas._toY(Number(DATA[idx][pm]||0));
+    var top=ptY-ttH-10;
+    if(top<4) top=ptY+16;
+    if(top+ttH>H-6) top=Math.max(4,H-ttH-6);
+    tt.style.left=left+"px";
+    tt.style.top=top+"px";
   }
   canvas.addEventListener("mousemove",onMove);
   canvas.addEventListener("mouseleave",function(){tt.style.display="none";});
