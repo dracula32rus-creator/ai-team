@@ -1,17 +1,29 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { handleTelegramMessage } from "@/lib/telegram";
 
-export const maxDuration = 300; // Vercel Pro: 5 мин
+export const maxDuration = 300;
+
+// Дедупликация — храним обработанные message_id последние 5 минут
+const processed = new Map<number, number>();
 
 export async function POST(req: NextRequest) {
   const update = await req.json();
 
-  // Сразу 200 — Telegram не будет слать повторы
-  const responsePromise = NextResponse.json({ ok: true });
+  const messageId = update?.message?.message_id;
+  if (messageId) {
+    const now = Date.now();
+    // Чистим старые записи
+    for (const [id, ts] of processed.entries()) {
+      if (now - ts > 5 * 60 * 1000) processed.delete(id);
+    }
+    // Если уже обрабатывали — игнорируем повтор
+    if (processed.has(messageId)) {
+      console.log("Nova: duplicate message_id", messageId, "— skipped");
+      return NextResponse.json({ ok: true });
+    }
+    processed.set(messageId, now);
+  }
 
-  // Обрабатываем в фоне без блокировки ответа
-  handleTelegramMessage(update, "buyer-nova", process.env.TELEGRAM_TOKEN_NOVA!)
-    .catch(e => console.error("Nova handler error:", e));
-
-  return responsePromise;
+  await handleTelegramMessage(update, "buyer-nova", process.env.TELEGRAM_TOKEN_NOVA!);
+  return NextResponse.json({ ok: true });
 }
