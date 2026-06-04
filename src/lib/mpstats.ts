@@ -74,11 +74,15 @@ export async function searchWbSubjects(keyword: string) {
 }
 
 export async function searchOzNiches(keyword: string) {
-  console.log("=== MPStats OZ search via niche/list full scan:", keyword);
+  console.log("=== MPStats OZ search via niche/list:", keyword);
 
-  // Качаем батчами по 500 (MPStats лимит)
-  const all: Record<string, unknown>[] = [];
+  // Качаем батчами по 500, останавливаемся как только нашли совпадение
   const batchSize = 500;
+  let bestMatch: Record<string, unknown> | null = null;
+  let bestScore = 0;
+  const keywordLower = keyword.toLowerCase();
+  const keywords = keywordLower.split(/\s+/).filter(w => w.length > 2);
+
   for (let startRow = 0; startRow < 5000; startRow += batchSize) {
     const res = await fetch(`${OZ_BASE}/niche/list`, {
       method: "POST",
@@ -86,46 +90,45 @@ export async function searchOzNiches(keyword: string) {
       body: JSON.stringify({ startRow, endRow: startRow + batchSize }),
     });
     const text = await res.text();
-    console.log(`OZ niche/list batch ${startRow}-${startRow + batchSize} status:`, res.status);
+    console.log(`OZ batch ${startRow}-${startRow + batchSize} status:`, res.status);
     if (!res.ok) break;
     try {
       const data = JSON.parse(text);
       const batch = (data?.data ?? []) as Record<string, unknown>[];
-      all.push(...batch);
-      if (batch.length < batchSize) break; // последняя страница
+      for (const s of batch) {
+        const name = String(s.category ?? "").toLowerCase();
+        let score = 0;
+        if (name === keywordLower) score += 100;
+        else if (name.includes(keywordLower)) score += 50;
+        else if (keywordLower.includes(name)) score += 30;
+        for (const kw of keywords) { if (name.includes(kw)) score += 10; }
+        // Бонус за высокий уровень категории (меньше вложенности = лучше)
+        if (score > 0) {
+          const depth = (name.match(/\//g) || []).length;
+          score += Math.max(0, 4 - depth) * 5;
+        }
+        if (score > bestScore) { bestScore = score; bestMatch = s; }
+      }
+      // Нашли хорошее совпадение — стоп
+      if (bestScore >= 50) {
+        console.log("OZ found match at batch", startRow, ":", bestMatch?.category, "(", bestScore, ")");
+        break;
+      }
+      if (batch.length < batchSize) break;
     } catch { break; }
   }
-  console.log("OZ total niches loaded:", all.length);
 
-  try {
-
-    const keywordLower = keyword.toLowerCase();
-    const keywords = keywordLower.split(/\s+/).filter(w => w.length > 2);
-
-    const scored = all.map((s) => {
-      const name = String(s.category ?? "").toLowerCase();
-      let score = 0;
-      if (name === keywordLower) score += 100;
-      else if (name.includes(keywordLower)) score += 50;
-      else if (keywordLower.includes(name)) score += 30;
-      for (const kw of keywords) {
-        if (name.includes(kw)) score += 10;
-      }
-      return { subject: s, score };
-    });
-
-    const relevant = scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score);
-    console.log("OZ relevant niches:", relevant.slice(0, 3).map(s => `${s.subject.category}(${s.score})`));
-
-    if (relevant.length === 0) return [];
-
-    return relevant.slice(0, 3).map(s => ({
-      id: s.subject.id,
-      name: s.subject.category,
-      market: "oz",
-    }));
-  } catch { return []; }
+  if (!bestMatch || bestScore === 0) {
+    console.log("OZ no match for:", keyword);
+    return [];
+  }
+  const fullName = String(bestMatch.category ?? "");
+  // Берём последний сегмент пути "Туризм / ... / Термосы" → "Термосы"
+  const shortName = fullName.split("/").pop()?.trim() || fullName;
+  console.log("OZ best match:", fullName, "→ short:", shortName, "score:", bestScore);
+  return [{ id: bestMatch.id, name: shortName, market: "oz" }];
 }
+
 
 export async function getWbNicheData(subjectId: number) {
   const { d1, d2 } = getDates();
@@ -140,7 +143,7 @@ export async function getWbNicheData(subjectId: number) {
   const [infoRes, sellersRes, brandsRes, priceRes, trendsRes] = await Promise.all([
     fetch(`${base}/${subjectId}`, { headers: h }),
     fetch(`${base}/sellers?${q}&startRow=0&endRow=10`, { method: "POST", headers: h, body: JSON.stringify({}) }),
-    fetch(`${base}/brands?${q}&startRow=0&endRow=5`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+    fetch(`${base}/brands?${q}&startRow=0&endRow=10`, { method: "POST", headers: h, body: JSON.stringify({}) }),
     fetch(`${base}/price_segmentation?${q}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
     fetch(`${base}/trends?${qTrend}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
   ]);

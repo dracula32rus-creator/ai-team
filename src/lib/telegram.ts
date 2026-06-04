@@ -203,7 +203,7 @@ function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: st
   if (sellers?.length) {
     ctx += `ТОП-5 ПРОДАВЦОВ (${marketLabel}):\n`;
     const totalRev = sellers.reduce((sum, s) => sum + Number(s.revenue ?? 0), 0);
-    sellers.slice(0, 5).forEach((s, i) => {
+    sellers.slice(0, 10).forEach((s, i) => {
       const revenue = Number(s.revenue ?? 0);
       const share = totalRev > 0 ? ((revenue / totalRev) * 100).toFixed(1) : "—";
       ctx += `${i + 1}. ${s.name} — ${revenue.toLocaleString("ru-RU")} ₽ (${s.revenue_share ?? share}%)\n`;
@@ -221,7 +221,7 @@ function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: st
 
   if (brands?.length) {
     ctx += `ТОП-5 БРЕНДОВ (${marketLabel}):\n`;
-    brands.slice(0, 5).forEach((b, i) => {
+    brands.slice(0, 10).forEach((b, i) => {
       ctx += `${i + 1}. ${b.name} — ${b.revenue ? Number(b.revenue).toLocaleString("ru-RU") : "—"} ₽\n`;
     });
     ctx += "\n";
