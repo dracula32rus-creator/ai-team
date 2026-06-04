@@ -270,8 +270,7 @@ function buildTrendSvg(trends: Record<string, unknown>[]): string {
   <div style="display:flex;gap:5px;flex-wrap:wrap;" id="${cid}tabs">
     <button onclick="${cid}T('revenue',this)" style="border:1.5px solid #ff6b3d;background:#ff6b3d22;color:#ff6b3d;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:600;cursor:pointer;">Сумма заказов</button>
     <button onclick="${cid}T('orders',this)" style="border:1.5px solid #333;background:#222;color:#666;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:600;cursor:pointer;">Кол-во заказов</button>
-    <button onclick="${cid}T('buyouts',this)" style="border:1.5px solid #333;background:#222;color:#666;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:600;cursor:pointer;">Кол-во выкупов</button>
-    <button onclick="${cid}T('buyouts_sum',this)" style="border:1.5px solid #333;background:#222;color:#666;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:600;cursor:pointer;">Сумма выкупов</button>
+    
   </div>
 </div>
 <div style="position:relative;" id="${cid}wrap">
@@ -615,13 +614,11 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
         console.log("=== Nova TG: original:", finalQuery, "| keyword:", queryToUse);
         const market = detectMarket(finalQuery);
         let subjects: { id: unknown; name: unknown; market: string }[] = [];
-        if (market === "wb") {
-          subjects = await searchWbSubjects(queryToUse);
-        } else if (market === "oz") {
+        if (market === "oz") {
           subjects = await searchOzNiches(queryToUse);
         } else {
-          const [wb, oz] = await Promise.all([searchWbSubjects(queryToUse), searchOzNiches(queryToUse)]);
-          subjects = [...wb.slice(0, 1), ...oz.slice(0, 1)];
+          // wb или both — берём только WB (OZ слишком медленный — 45 сек, Telegram шлёт retry)
+          subjects = await searchWbSubjects(queryToUse);
         }
         console.log("=== Nova TG: found:", subjects.length, "subjects for market:", market);
         if (subjects.length > 0) {
