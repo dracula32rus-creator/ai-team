@@ -284,7 +284,7 @@ function buildInteractiveTrendChart(
       <div style="font-size:12px;color:#666;margin-top:2px;">По месяцам · несколько метрик · наведи на точку</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;" id="${chartId}_tabs">
-      <button onclick="${chartId}_toggle('revenue',this)"     id="${chartId}_t_revenue"     class="${chartId}_tab" style="border-color:${primaryColor};background:${primaryColor}22;color:${primaryColor};">Сумма заказов</button>
+      <button onclick="${chartId}_toggle('revenue',this)"     id="${chartId}_t_revenue"     class="${chartId}_tab" style="border-color:#17BF50;background:#17BF5022;color:#17BF50;">Сумма заказов</button>
       <button onclick="${chartId}_toggle('orders',this)"      id="${chartId}_t_orders"      class="${chartId}_tab">Кол-во заказов</button>
       <button onclick="${chartId}_toggle('buyouts',this)"     id="${chartId}_t_buyouts"     class="${chartId}_tab">Кол-во выкупов</button>
       <button onclick="${chartId}_toggle('buyouts_sum',this)" id="${chartId}_t_buyouts_sum" class="${chartId}_tab">Сумма выкупов</button>
@@ -307,7 +307,8 @@ function buildInteractiveTrendChart(
   var DATA=${dataJson};
   var PRIMARY="${primaryColor}",SEC="${secondColor}";
   var CID="${chartId}";
-  var MCOLORS={revenue:PRIMARY,orders:SEC,buyouts:"#BA7517",buyouts_sum:"#993C1D"};
+  var MCOLORS={revenue:"#17BF50",orders:"#4A9EE0",buyouts:"#FF9800",buyouts_sum:"#E040FB"};
+  var MLINES={revenue:{w:2.5,dash:[]},orders:{w:2,dash:[6,3]},buyouts:{w:2,dash:[2,2]},buyouts_sum:{w:1.5,dash:[8,3,2,3]}};
   var MLABELS={revenue:"Сумма заказов",orders:"Кол-во заказов",buyouts:"Кол-во выкупов",buyouts_sum:"Сумма выкупов"};
   var active={revenue:true};
   var canvas=document.getElementById(CID+"_canvas");
@@ -374,7 +375,9 @@ function buildInteractiveTrendChart(
         var lp0=li>0?pts[li-1]:pts[li],lp1=pts[li],lp2=pts[li+1],lp3=li<pts.length-2?pts[li+2]:pts[li+1];
         ctx.bezierCurveTo(lp1.x+(lp2.x-lp0.x)/4,lp1.y+(lp2.y-lp0.y)/4,lp2.x-(lp3.x-lp1.x)/4,lp2.y-(lp3.y-lp1.y)/4,lp2.x,lp2.y);
       }
-      ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.lineJoin="round";ctx.lineCap="round";ctx.stroke();
+      var ls=MLINES[met]||{w:2,dash:[]};
+      ctx.strokeStyle=color;ctx.lineWidth=ls.w;ctx.setLineDash(ls.dash);ctx.lineJoin="round";ctx.lineCap="round";ctx.stroke();
+      ctx.setLineDash([]);
       // dots
       for(var di=0;di<pts.length;di++){
         if(di%3!==0&&di!==0&&di!==pts.length-1)continue;
@@ -729,82 +732,78 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
       } catch (e) { console.error("Search failed:", e); }
     }
 
-    // ── Запрос к Claude ───────────────────────────────────────────────────────
-    const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4.6",
-        max_tokens: agentId === "buyer-nova" ? 4000 : 1500,
-        messages: [
-          { role: "system", content: agent.systemPrompt + extraContext },
-          { role: "user", content: finalQuery || "Проанализируй присланное фото" },
-        ],
-      }),
-    });
+    // ── Запрос к Claude + отправка ──────────────────────────────────────────────
+    const hasWb = wbNicheData !== null;
+    const hasOz = ozNicheData !== null;
 
-    const data = await res.json();
-    const response = data.choices?.[0]?.message?.content ?? "Не смог ответить, попробуй ещё раз.";
-
-    // ── Отправка ответа ───────────────────────────────────────────────────────
     if (agentId === "buyer-nova" && novaSubjectName) {
-      const hasWb = wbNicheData !== null;
-      const hasOz = ozNicheData !== null;
       const marketNames = [hasWb ? "WB" : "", hasOz ? "Ozon" : ""].filter(Boolean).join(" и ");
-
       await sendTelegramMessage(botToken, chatId, `📊 Анализ ниши *${novaSubjectName}* (${marketNames}) — файл(ы) ниже 👇`);
 
-      if (hasWb && hasOz) {
-        // Два отдельных HTML-файла — сначала WB, потом Ozon
-        // WB — запрашиваем отдельный Claude-ответ только по WB данным
-        const wbCtx = "\n\n" + formatMpstatsForTelegram({ ...wbNicheData!, market: "wb" }, wbNicheName);
-        const wbRes = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+      async function claudeRequest(ctx: string): Promise<string> {
+        const r = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
           method: "POST",
           headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "claude-sonnet-4.6",
             max_tokens: 4000,
             messages: [
-              { role: "system", content: agent.systemPrompt + wbCtx },
+              { role: "system", content: agent!.systemPrompt + ctx },
               { role: "user", content: finalQuery },
             ],
           }),
         });
-        const wbData = await wbRes.json();
-        const wbResponse = wbData.choices?.[0]?.message?.content ?? "";
-        const wbHtml = generateNovaHtmlReport(wbResponse, wbNicheName, "wb", novaWbTrends);
-        await sendNovaHtmlReport(botToken, chatId, wbHtml, wbNicheName, "wb");
-
-        // Ozon
-        const ozCtx = "\n\n" + formatMpstatsForTelegram({ ...ozNicheData!, market: "oz" }, ozNicheName);
-        const ozRes = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4.6",
-            max_tokens: 4000,
-            messages: [
-              { role: "system", content: agent.systemPrompt + ozCtx },
-              { role: "user", content: finalQuery },
-            ],
-          }),
-        });
-        const ozData = await ozRes.json();
-        const ozResponse = ozData.choices?.[0]?.message?.content ?? "";
-        const ozHtml = generateNovaHtmlReport(ozResponse, ozNicheName, "oz", novaOzTrends);
-        await sendNovaHtmlReport(botToken, chatId, ozHtml, ozNicheName, "oz");
-
-      } else if (hasWb) {
-        const wbHtml = generateNovaHtmlReport(response, wbNicheName || novaSubjectName, "wb", novaWbTrends);
-        await sendNovaHtmlReport(botToken, chatId, wbHtml, wbNicheName || novaSubjectName, "wb");
-      } else if (hasOz) {
-        const ozHtml = generateNovaHtmlReport(response, ozNicheName || novaSubjectName, "oz", novaOzTrends);
-        await sendNovaHtmlReport(botToken, chatId, ozHtml, ozNicheName || novaSubjectName, "oz");
-      } else {
-        // MPStats не нашёл — просто текст от Claude
-        await sendTelegramMessage(botToken, chatId, response);
+        const d = await r.json();
+        return d.choices?.[0]?.message?.content ?? "Не смог сформировать отчёт.";
       }
+
+      if (hasWb) {
+        const wbCtx = "\n\n" + formatMpstatsForTelegram({ ...wbNicheData!, market: "wb" }, wbNicheName);
+        const wbResponse = await claudeRequest(wbCtx);
+        const wbHtml = generateNovaHtmlReport(wbResponse, wbNicheName || novaSubjectName, "wb", novaWbTrends);
+        await sendNovaHtmlReport(botToken, chatId, wbHtml, wbNicheName || novaSubjectName, "wb");
+      }
+
+      if (hasOz) {
+        const ozCtx = "\n\n" + formatMpstatsForTelegram({ ...ozNicheData!, market: "oz" }, ozNicheName);
+        const ozResponse = await claudeRequest(ozCtx);
+        const ozHtml = generateNovaHtmlReport(ozResponse, ozNicheName || novaSubjectName, "oz", novaOzTrends);
+        await sendNovaHtmlReport(botToken, chatId, ozHtml, ozNicheName || novaSubjectName, "oz");
+      }
+
+      if (!hasWb && !hasOz) {
+        // MPStats не нашёл — текстовый ответ Claude без данных
+        const r = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4.6", max_tokens: 1000,
+            messages: [
+              { role: "system", content: agent!.systemPrompt + extraContext },
+              { role: "user", content: finalQuery },
+            ],
+          }),
+        });
+        const d = await r.json();
+        await sendTelegramMessage(botToken, chatId, d.choices?.[0]?.message?.content ?? "Ниша не найдена.");
+      }
+
     } else {
+      // Все остальные агенты — обычный Claude запрос
+      const res = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4.6",
+          max_tokens: 1500,
+          messages: [
+            { role: "system", content: agent!.systemPrompt + extraContext },
+            { role: "user", content: finalQuery || "Проанализируй присланное фото" },
+          ],
+        }),
+      });
+      const data = await res.json();
+      const response = data.choices?.[0]?.message?.content ?? "Не смог ответить, попробуй ещё раз.";
       await sendTelegramMessage(botToken, chatId, response);
     }
 
