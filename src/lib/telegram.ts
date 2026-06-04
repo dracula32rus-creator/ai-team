@@ -252,42 +252,165 @@ function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: st
 
 function buildTrendSvg(trends: Record<string, unknown>[]): string {
   if (trends.length < 2) return "";
-  const revenues = trends.map(t => Number(t.revenue ?? 0));
-  const maxRev = Math.max(...revenues);
-  const minRev = Math.min(...revenues);
-  const range = maxRev - minRev || 1;
-  const W = 700, H = 220, padL = 70, padR = 20, padT = 20, padB = 45;
-  const chartW = W - padL - padR, chartH = H - padT - padB;
-  const points = trends.map((t, i) => {
-    const x = padL + (i / (trends.length - 1)) * chartW;
-    const y = padT + chartH - ((Number(t.revenue ?? 0) - minRev) / range) * chartH;
-    return { x, y, revenue: Number(t.revenue ?? 0), label: String(t.label_date ?? "") };
-  });
-  const polyline = points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  const areaPoints = `${padL},${padT + chartH} ` + points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ") + ` ${padL + chartW},${padT + chartH}`;
-  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(ratio => {
-    const y = padT + chartH - ratio * chartH;
-    const val = ((minRev + ratio * range) / 1_000_000).toFixed(1);
-    return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${padL + chartW}" y2="${y.toFixed(1)}" stroke="#2a2a2a" stroke-width="1"/>
-<text x="${(padL - 6).toFixed(1)}" y="${(y + 4).toFixed(1)}" fill="#666" font-size="11" text-anchor="end">${val}м</text>`;
-  }).join("\n");
-  const labels = points.filter((_, i) => i % 3 === 0 || i === points.length - 1).map(p =>
-    `<text x="${p.x.toFixed(1)}" y="${(padT + chartH + 20).toFixed(1)}" fill="#888" font-size="11" text-anchor="middle">${p.label}</text>`
-  ).join("\n");
-  const dots = points.map(p =>
-    `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="#ff6b3d" stroke="#1a1a1a" stroke-width="2"><title>${p.label}: ${(p.revenue/1_000_000).toFixed(1)}м ₽</title></circle>`
-  ).join("\n");
-  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:${W}px;height:auto;display:block">
-  <defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0%" stop-color="#ff6b3d" stop-opacity="0.25"/>
-    <stop offset="100%" stop-color="#ff6b3d" stop-opacity="0"/>
-  </linearGradient></defs>
-  ${gridLines}
-  <polygon points="${areaPoints}" fill="url(#areaGrad)"/>
-  <polyline points="${polyline}" fill="none" stroke="#ff6b3d" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-  ${dots}${labels}
-</svg>`;
+
+  const points = trends.map(t => ({
+    label: String(t.label_date ?? t.date ?? ""),
+    revenue:     Number(t.revenue   ?? 0),
+    orders:      Number(t.sales     ?? t.orders ?? 0),
+    buyouts:     Number(t.buyouts_count ?? t.buyouts ?? 0),
+    buyouts_sum: Number(t.buyouts_revenue ?? t.buyouts_sum ?? 0),
+  }));
+
+  const dataJson = JSON.stringify(points);
+  const cid = "tc_" + Math.random().toString(36).slice(2, 7);
+
+  return `<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:18px 20px;margin-bottom:14px;font-family:-apple-system,sans-serif;">
+<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+  <div style="font-size:15px;font-weight:700;color:#e8e8e8;">📈 Тренд (4 года)</div>
+  <div style="display:flex;gap:5px;flex-wrap:wrap;" id="${cid}tabs">
+    <button onclick="${cid}T('revenue',this)" style="border:1.5px solid #ff6b3d;background:#ff6b3d22;color:#ff6b3d;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:600;cursor:pointer;">Сумма заказов</button>
+    <button onclick="${cid}T('orders',this)" style="border:1.5px solid #333;background:#222;color:#666;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:600;cursor:pointer;">Кол-во заказов</button>
+    <button onclick="${cid}T('buyouts',this)" style="border:1.5px solid #333;background:#222;color:#666;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:600;cursor:pointer;">Кол-во выкупов</button>
+    <button onclick="${cid}T('buyouts_sum',this)" style="border:1.5px solid #333;background:#222;color:#666;border-radius:6px;padding:4px 11px;font-size:11px;font-weight:600;cursor:pointer;">Сумма выкупов</button>
+  </div>
+</div>
+<div style="position:relative;" id="${cid}wrap">
+  <div id="${cid}tt" style="display:none;position:absolute;z-index:20;background:#0f0f0f;color:#e8e8e8;border:1px solid #444;border-radius:8px;padding:9px 13px;font-size:12px;line-height:1.8;pointer-events:none;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,.6);"></div>
+  <div style="overflow-x:auto;" id="${cid}scr"><canvas id="${cid}c" style="display:block;cursor:crosshair;"></canvas></div>
+</div>
+<div id="${cid}leg" style="display:flex;gap:12px;margin-top:8px;font-size:11px;color:#666;flex-wrap:wrap;"></div>
+</div>
+<script>
+(function(){
+  var D=${dataJson};
+  var CID="${cid}";
+  var MC={revenue:"#ff6b3d",orders:"#4A9EE0",buyouts:"#FF9800",buyouts_sum:"#C77DFF"};
+  var ML={revenue:"Сумма заказов",orders:"Кол-во заказов",buyouts:"Кол-во выкупов",buyouts_sum:"Сумма выкупов"};
+  var MS={revenue:{w:2.5,d:[]},orders:{w:2,d:[6,3]},buyouts:{w:2,d:[2,3]},buyouts_sum:{w:1.5,d:[8,3,2,3]}};
+  var active={revenue:true};
+  var cv=document.getElementById(CID+"c");
+  var tt=document.getElementById(CID+"tt");
+  var leg=document.getElementById(CID+"leg");
+  var scr=document.getElementById(CID+"scr");
+  var wrap=document.getElementById(CID+"wrap");
+  var ctx=cv.getContext("2d");
+  var P={t:22,r:22,b:54,l:72},H=255;
+  function fmt(v,m){
+    if(m==="revenue"||m==="buyouts_sum"){if(v>=1e9)return(v/1e9).toFixed(1)+" млрд ₽";if(v>=1e6)return(v/1e6).toFixed(1)+" млн ₽";if(v>=1e3)return(v/1e3).toFixed(0)+" тыс ₽";return v.toLocaleString("ru-RU")+" ₽";}
+    if(v>=1e6)return(v/1e6).toFixed(1)+" млн шт";if(v>=1e3)return(v/1e3).toFixed(0)+" тыс шт";return v.toLocaleString("ru-RU")+" шт";
+  }
+  function fmtA(v,m){
+    if(m==="revenue"||m==="buyouts_sum"){if(v>=1e9)return(v/1e9).toFixed(1)+"млрд";if(v>=1e6)return(v/1e6).toFixed(1)+"млн";if(v>=1e3)return(v/1e3).toFixed(0)+"тыс";return v.toFixed(0);}
+    if(v>=1e6)return(v/1e6).toFixed(1)+"млн";if(v>=1e3)return(v/1e3).toFixed(0)+"тыс";return v.toFixed(0);
+  }
+  function ga(){return Object.keys(active).filter(function(k){return active[k];});}
+  function draw(){
+    var N=D.length,cw=Math.max(14,Math.min(34,Math.floor(500/N)));
+    var W=P.l+N*cw+P.r;
+    cv.width=W;cv.height=H;cv.style.width=W+"px";cv.style.height=H+"px";
+    ctx.clearRect(0,0,W,H);
+    var ms=ga(),pm=ms[0]||"revenue";
+    // minmax только для основной метрики (ось Y)
+    var lo=Infinity,hi=0;
+    for(var i=0;i<D.length;i++){var v=Number(D[i][pm]||0);if(v>hi)hi=v;if(v<lo)lo=v;}
+    if(hi===0)hi=1;if(lo===Infinity)lo=0;
+    var range=hi-lo||1,ch=H-P.t-P.b;
+    function toY(v){return P.t+ch-((v-lo)/range)*ch;}
+    function toX(i){return P.l+i*cw+cw/2;}
+    // Grid
+    ctx.font="10px -apple-system,sans-serif";
+    for(var gi=0;gi<=4;gi++){
+      var gy=toY(lo+(gi/4)*range);
+      ctx.strokeStyle="rgba(255,255,255,0.05)";ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(P.l,gy);ctx.lineTo(W-P.r,gy);ctx.stroke();
+      ctx.fillStyle="#555";ctx.textAlign="right";
+      ctx.fillText(fmtA(lo+(gi/4)*range,pm),P.l-5,gy+4);
+    }
+    // X axis
+    var prevYr="";
+    for(var xi=0;xi<N;xi++){
+      var lbl=D[xi].label,yr=lbl.slice(0,4),mo=lbl.slice(5),xx=toX(xi);
+      if(yr!==prevYr){
+        ctx.fillStyle="rgba(255,107,61,0.06)";ctx.fillRect(xx-cw/2,P.t,cw,ch);
+        ctx.font="bold 10px -apple-system,sans-serif";ctx.fillStyle="#ff6b3d";ctx.textAlign="center";
+        ctx.fillText(yr,xx,H-P.b+28);prevYr=yr;
+      }
+      if(xi%3===0){ctx.font="9px -apple-system,sans-serif";ctx.fillStyle="#444";ctx.textAlign="center";ctx.fillText(mo,xx,H-P.b+14);}
+    }
+    // Каждая метрика — по своему minmax (нормализация)
+    for(var mi=0;mi<ms.length;mi++){
+      var met=ms[mi],color=MC[met],sty=MS[met];
+      var mlo=Infinity,mhi=0;
+      for(var di=0;di<D.length;di++){var mv=Number(D[di][met]||0);if(mv>mhi)mhi=mv;if(mv<mlo)mlo=mv;}
+      if(mhi===0)mhi=1;if(mlo===Infinity)mlo=0;
+      var mrange=mhi-mlo||1;
+      function mtoY(v,mlo,mrange){return P.t+ch-((v-mlo)/mrange)*ch;}
+      var pts=D.map(function(d,i){return{x:toX(i),y:mtoY(Number(d[met]||0),mlo,mrange)};});
+      // Area
+      ctx.beginPath();ctx.moveTo(pts[0].x,P.t+ch);ctx.lineTo(pts[0].x,pts[0].y);
+      for(var ci=0;ci<pts.length-1;ci++){
+        var p0=ci>0?pts[ci-1]:pts[ci],p1=pts[ci],p2=pts[ci+1],p3=ci<pts.length-2?pts[ci+2]:pts[ci+1];
+        ctx.bezierCurveTo(p1.x+(p2.x-p0.x)/4,p1.y+(p2.y-p0.y)/4,p2.x-(p3.x-p1.x)/4,p2.y-(p3.y-p1.y)/4,p2.x,p2.y);
+      }
+      ctx.lineTo(pts[pts.length-1].x,P.t+ch);ctx.closePath();
+      var rgb=parseInt(color.slice(1,3),16)+","+parseInt(color.slice(3,5),16)+","+parseInt(color.slice(5,7),16);
+      ctx.fillStyle="rgba("+rgb+","+(ms.length>1?0.05:0.1)+")";ctx.fill();
+      // Line
+      ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+      for(var li=0;li<pts.length-1;li++){
+        var lp0=li>0?pts[li-1]:pts[li],lp1=pts[li],lp2=pts[li+1],lp3=li<pts.length-2?pts[li+2]:pts[li+1];
+        ctx.bezierCurveTo(lp1.x+(lp2.x-lp0.x)/4,lp1.y+(lp2.y-lp0.y)/4,lp2.x-(lp3.x-lp1.x)/4,lp2.y-(lp3.y-lp1.y)/4,lp2.x,lp2.y);
+      }
+      ctx.strokeStyle=color;ctx.lineWidth=sty.w;ctx.setLineDash(sty.d);ctx.lineJoin="round";ctx.lineCap="round";ctx.stroke();ctx.setLineDash([]);
+      // Dots
+      for(var doti=0;doti<pts.length;doti++){
+        if(doti%3!==0&&doti!==0&&doti!==pts.length-1)continue;
+        ctx.beginPath();ctx.arc(pts[doti].x,pts[doti].y,3,0,Math.PI*2);
+        ctx.fillStyle=color;ctx.fill();ctx.strokeStyle="#1a1a1a";ctx.lineWidth=1.5;ctx.stroke();
+      }
+      // Сохраняем pts для тултипа
+      D._pts=D._pts||{};D._pts[met]=pts;D._mlo=D._mlo||{};D._mhi=D._mhi||{};
+      D._mlo[met]=mlo;D._mhi[met]=mhi;
+    }
+    cv._N=N;cv._cw=cw;cv._ch=ch;cv._toX=toX;
+    leg.innerHTML=ms.map(function(m){return'<div style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:3px;background:'+MC[m]+';border-radius:2px;display:inline-block;"></span><span>'+ML[m]+'</span></div>';}).join("");
+  }
+  function onMove(e){
+    if(!cv._N)return;
+    var wr=wrap.getBoundingClientRect(),sx=scr.scrollLeft;
+    var mx=(e.clientX-wr.left)+sx;
+    var idx=Math.round((mx-P.l-cv._cw/2)/cv._cw);
+    if(idx<0||idx>=cv._N){tt.style.display="none";return;}
+    var ms=ga(),html='<div style="font-weight:700;color:#ff6b3d;margin-bottom:4px;font-size:13px;">'+D[idx].label+'</div>';
+    for(var i=0;i<ms.length;i++){
+      html+='<div style="display:flex;align-items:center;gap:5px;">'+
+        '<span style="width:7px;height:7px;border-radius:50%;background:'+MC[ms[i]]+';flex-shrink:0;"></span>'+
+        '<span style="color:#888;">'+ML[ms[i]]+':</span> '+
+        '<span style="font-weight:600;color:#e8e8e8;">'+fmt(Number(D[idx][ms[i]]||0),ms[i])+'</span></div>';
+    }
+    tt.innerHTML=html;tt.style.left="-9999px";tt.style.display="block";
+    var ttW=tt.offsetWidth||200,ttH=tt.offsetHeight||90,wW=wr.width;
+    var xW=P.l+idx*cv._cw+cv._cw/2-sx;
+    var left=xW+14;if(left+ttW>wW-6)left=xW-ttW-14;if(left<4)left=4;
+    var pm=ms[0]||"revenue";
+    var pts=D._pts&&D._pts[pm];
+    var ptY=pts?pts[idx].y:P.t+cv._ch/2;
+    var top=ptY-ttH-10;if(top<4)top=ptY+16;if(top+ttH>H-6)top=Math.max(4,H-ttH-6);
+    tt.style.left=left+"px";tt.style.top=top+"px";
+  }
+  cv.addEventListener("mousemove",onMove);
+  cv.addEventListener("mouseleave",function(){tt.style.display="none";});
+  window[CID+"T"]=function(met,btn){
+    var keys=Object.keys(active).filter(function(k){return active[k];});
+    if(active[met]){if(keys.length===1)return;delete active[met];btn.style.borderColor="#333";btn.style.background="#222";btn.style.color="#666";}
+    else{active[met]=true;btn.style.borderColor=MC[met];btn.style.background=MC[met]+"22";btn.style.color=MC[met];}
+    draw();
+  };
+  draw();
+})();
+</script>`;
 }
+
 
 function generateNovaHtmlReport(markdown: string, nicheName: string, trendsWb?: Record<string, unknown>[], trendsOz?: Record<string, unknown>[]): string {
   const now = new Date();
