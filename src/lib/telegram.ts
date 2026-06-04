@@ -327,25 +327,32 @@ function buildInteractiveTrendChart(
     else{if(v>=1e6)return(v/1e6).toFixed(1)+"млн";if(v>=1e3)return(v/1e3).toFixed(0)+"тыс";return v.toFixed(0);}
   }
   function getActive(){return Object.keys(active).filter(function(k){return active[k];});}
-  function minmax(){
-    var lo=Infinity,hi=0,ms=getActive();
-    for(var i=0;i<DATA.length;i++)for(var j=0;j<ms.length;j++){var v=Number(DATA[i][ms[j]]||0);if(v>hi)hi=v;if(v<lo)lo=v;}
+  function minmaxFor(met){
+    var lo=Infinity,hi=0;
+    for(var i=0;i<DATA.length;i++){var v=Number(DATA[i][met]||0);if(v>hi)hi=v;if(v<lo)lo=v;}
     if(hi===0)hi=1;if(lo===Infinity)lo=0;return{lo:lo,hi:hi};
+  }
+  function minmax(){
+    // Глобальный minmax только для совместимости — используем нормализацию
+    return{lo:0,hi:1};
   }
   function draw(){
     var N=DATA.length,colW=Math.max(16,Math.min(36,Math.floor(520/N)));
     var W=PAD.left+N*colW+PAD.right;
     canvas.width=W;canvas.height=H;canvas.style.width=W+"px";canvas.style.height=H+"px";
     ctx.clearRect(0,0,W,H);
-    var mm=minmax(),lo=mm.lo,hi=mm.hi,range=hi-lo||1,chartH=H-PAD.top-PAD.bottom;
-    function toY(v){return PAD.top+chartH-((v-lo)/range)*chartH;}
+    var chartH=H-PAD.top-PAD.bottom;
+    function toYnorm(norm){return PAD.top+chartH-(norm)*chartH;}
     function toX(i){return PAD.left+i*colW+colW/2;}
     var ms=getActive(),pm=ms[0]||"revenue";
+    var pmm=minmaxFor(pm);
+    function toY(v){return toYnorm((v-pmm.lo)/(pmm.hi-pmm.lo||1));}
     ctx.font="11px -apple-system,sans-serif";
     for(var gi=0;gi<=4;gi++){
-      var gy=toY(lo+(gi/4)*range);
+      var gy=toYnorm(gi/4);
       ctx.strokeStyle="rgba(255,255,255,0.06)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD.left,gy);ctx.lineTo(W-PAD.right,gy);ctx.stroke();
-      ctx.fillStyle="#555";ctx.textAlign="right";ctx.fillText(fmtA(lo+(gi/4)*range,pm),PAD.left-6,gy+4);
+      ctx.fillStyle="#555";ctx.textAlign="right";
+      ctx.fillText(fmtA(pmm.lo+(gi/4)*(pmm.hi-pmm.lo),pm),PAD.left-6,gy+4);
     }
     var prevYr="";
     for(var xi=0;xi<N;xi++){
@@ -360,7 +367,8 @@ function buildInteractiveTrendChart(
     for(var mi=0;mi<ms.length;mi++){
       var met=ms[mi],color=MCOLORS[met];
       var r=parseInt(color.slice(1,3),16),g=parseInt(color.slice(3,5),16),b=parseInt(color.slice(5,7),16);
-      var pts=DATA.map(function(d,i){return{x:toX(i),y:toY(Number(d[met]||0))};});
+      var mm2=minmaxFor(met),lo2=mm2.lo,range2=mm2.hi-mm2.lo||1;
+      var pts=DATA.map(function(d,i){return{x:toX(i),y:toYnorm((Number(d[met]||0)-lo2)/range2)};});
       // area
       ctx.beginPath();ctx.moveTo(pts[0].x,toY(lo));ctx.lineTo(pts[0].x,pts[0].y);
       for(var ci=0;ci<pts.length-1;ci++){
@@ -386,7 +394,7 @@ function buildInteractiveTrendChart(
       }
     }
     leg.innerHTML=ms.map(function(m){return'<div style="display:flex;align-items:center;gap:5px;"><span style="width:14px;height:3px;border-radius:2px;background:'+MCOLORS[m]+';display:inline-block;"></span><span>'+MLABELS[m]+'</span></div>';}).join("");
-    canvas._N=N;canvas._colW=colW;canvas._toY=toY;canvas._toX=toX;canvas._chartH=chartH;canvas._lo=lo;
+    canvas._N=N;canvas._colW=colW;canvas._toY=toY;canvas._toYnorm=toYnorm;canvas._minmaxFor=minmaxFor;canvas._toX=toX;canvas._chartH=chartH;
   }
   function onMove(e){
     if(!canvas._N)return;
@@ -411,7 +419,8 @@ function buildInteractiveTrendChart(
     if(left+ttW>wrapW-6) left=xInWrap-ttW-16;
     if(left<4) left=4;
     var pm=ms[0]||"revenue";
-    var ptY=canvas._toY(Number(DATA[idx][pm]||0));
+    var pmm2=canvas._minmaxFor(pm);
+    var ptY=canvas._toYnorm((Number(DATA[idx][pm]||0)-pmm2.lo)/(pmm2.hi-pmm2.lo||1));
     var top=ptY-ttH-10;
     if(top<4) top=ptY+16;
     if(top+ttH>H-6) top=Math.max(4,H-ttH-6);
@@ -433,32 +442,53 @@ function buildInteractiveTrendChart(
 // ─────────────────────────────────────────────────────────────────────────────
 
 function generateNovaHtmlReport(
-  markdown: string,
   nicheName: string,
-  market: "wb" | "oz",
-  trends: Record<string, unknown>[]
+  wbMarkdown: string,
+  ozMarkdown: string,
+  wbTrends: Record<string, unknown>[],
+  ozTrends: Record<string, unknown>[]
 ): string {
   const now = new Date();
   const dateStr = now.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
-  const marketLabel = market === "wb" ? "Wildberries" : "Ozon";
-  const headerGradient = market === "wb"
-    ? "linear-gradient(135deg, #993C1D, #c4522a)"
-    : "linear-gradient(135deg, #0d3f6e, #185FA5)";
-  const accentColor = market === "wb" ? "#ff6b3d" : "#4A9EE0";
-  const chartHtml = buildInteractiveTrendChart(trends, market);
+  const hasWbContent = wbMarkdown.length > 0;
+  const hasOzContent = ozMarkdown.length > 0;
+  const accentColor = "#ff6b3d";
+  const wbChartHtml = wbTrends.length >= 2 ? buildInteractiveTrendChart(wbTrends, "wb") : "";
+  const ozChartHtml = ozTrends.length >= 2 ? buildInteractiveTrendChart(ozTrends, "oz") : "";
+
+  const wbSection = hasWbContent ? `
+    <div class="market-header wb-header">
+      <span class="market-badge">🛍 Wildberries</span>
+    </div>
+    ${wbChartHtml}
+    <div class="market-content">${convertMarkdownToHtml(wbMarkdown)}</div>
+  ` : "";
+
+  const ozSection = hasOzContent ? `
+    <div class="market-header oz-header">
+      <span class="market-badge">🟠 Ozon</span>
+    </div>
+    ${ozChartHtml}
+    <div class="market-content">${convertMarkdownToHtml(ozMarkdown)}</div>
+  ` : "";
 
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${marketLabel}: ${nicheName}</title>
+<title>Анализ ниши: ${nicheName}</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e8e8e8; padding: 24px; max-width: 900px; margin: 0 auto; }
-  .header { background: ${headerGradient}; border-radius: 16px; padding: 28px 32px; margin-bottom: 20px; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e8e8e8; padding: 24px; max-width: 960px; margin: 0 auto; }
+  .header { background: linear-gradient(135deg, #1a1a2e, #16213e); border: 1px solid #2a2a3e; border-radius: 16px; padding: 28px 32px; margin-bottom: 20px; }
   .header h1 { font-size: 26px; font-weight: 700; color: white; margin-bottom: 6px; }
-  .header .meta { font-size: 13px; color: rgba(255,255,255,0.7); }
+  .header .meta { font-size: 13px; color: rgba(255,255,255,0.5); }
+  .market-header { border-radius: 10px; padding: 14px 20px; margin: 24px 0 14px; display: flex; align-items: center; gap: 10px; }
+  .wb-header { background: linear-gradient(135deg, #993C1D, #c4522a); }
+  .oz-header { background: linear-gradient(135deg, #0d3f6e, #185FA5); }
+  .market-badge { font-size: 16px; font-weight: 700; color: white; }
+  .market-divider { border: none; border-top: 2px solid #2a2a2a; margin: 32px 0; }
   .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 22px; margin-bottom: 14px; }
   h2 { font-size: 17px; font-weight: 600; color: ${accentColor}; margin-bottom: 14px; border-bottom: 1px solid #2a2a2a; padding-bottom: 8px; }
   h3 { font-size: 14px; font-weight: 600; color: #e8e8e8; margin: 14px 0 8px; }
@@ -487,11 +517,12 @@ function generateNovaHtmlReport(
 </head>
 <body>
 <div class="header">
-  <h1>📊 ${nicheName} — ${marketLabel}</h1>
+  <h1>📊 ${nicheName}</h1>
   <div class="meta">Анализ ниши MPStats · ${dateStr}</div>
 </div>
-${chartHtml}
-<div id="content">${convertMarkdownToHtml(markdown)}</div>
+${wbSection}
+${hasWbContent && hasOzContent ? '<hr class="market-divider">' : ""}
+${ozSection}
 <div class="footer">Powered by MPStats · AI Team WB/Ozon · ${dateStr}</div>
 </body>
 </html>`;
@@ -572,16 +603,14 @@ async function sendNovaHtmlReport(
   botToken: string,
   chatId: number,
   html: string,
-  nicheName: string,
-  market: "wb" | "oz"
+  nicheName: string
 ): Promise<void> {
   try {
-    const marketLabel = market === "wb" ? "Wildberries" : "Ozon";
-    const fileName = `nova-${nicheName.replace(/[^а-яёa-z0-9]/gi, "-").toLowerCase()}-${market}-${Date.now()}.html`;
+    const fileName = `nova-${nicheName.replace(/[^а-яёa-z0-9]/gi, "-").toLowerCase()}-${Date.now()}.html`;
     const buffer = Buffer.from(html, "utf-8");
     const formData = new FormData();
     formData.append("chat_id", String(chatId));
-    formData.append("caption", `📊 ${nicheName} — ${marketLabel}`);
+    formData.append("caption", `📊 Анализ ниши: ${nicheName}`);
     formData.append("document", new Blob([buffer], { type: "text/html" }), fileName);
     await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, { method: "POST", body: formData });
   } catch (e) {
@@ -737,42 +766,8 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
     const hasOz = ozNicheData !== null;
 
     if (agentId === "buyer-nova" && novaSubjectName) {
-      const marketNames = [hasWb ? "WB" : "", hasOz ? "Ozon" : ""].filter(Boolean).join(" и ");
-      await sendTelegramMessage(botToken, chatId, `📊 Анализ ниши *${novaSubjectName}* (${marketNames}) — файл(ы) ниже 👇`);
-
-      async function claudeRequest(ctx: string): Promise<string> {
-        const r = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4.6",
-            max_tokens: 4000,
-            messages: [
-              { role: "system", content: agent!.systemPrompt + ctx },
-              { role: "user", content: finalQuery },
-            ],
-          }),
-        });
-        const d = await r.json();
-        return d.choices?.[0]?.message?.content ?? "Не смог сформировать отчёт.";
-      }
-
-      if (hasWb) {
-        const wbCtx = "\n\n" + formatMpstatsForTelegram({ ...wbNicheData!, market: "wb" }, wbNicheName);
-        const wbResponse = await claudeRequest(wbCtx);
-        const wbHtml = generateNovaHtmlReport(wbResponse, wbNicheName || novaSubjectName, "wb", novaWbTrends);
-        await sendNovaHtmlReport(botToken, chatId, wbHtml, wbNicheName || novaSubjectName, "wb");
-      }
-
-      if (hasOz) {
-        const ozCtx = "\n\n" + formatMpstatsForTelegram({ ...ozNicheData!, market: "oz" }, ozNicheName);
-        const ozResponse = await claudeRequest(ozCtx);
-        const ozHtml = generateNovaHtmlReport(ozResponse, ozNicheName || novaSubjectName, "oz", novaOzTrends);
-        await sendNovaHtmlReport(botToken, chatId, ozHtml, ozNicheName || novaSubjectName, "oz");
-      }
-
       if (!hasWb && !hasOz) {
-        // MPStats не нашёл — текстовый ответ Claude без данных
+        // MPStats не нашёл ничего — текстовый ответ
         const r = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
           method: "POST",
           headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
@@ -786,6 +781,38 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
         });
         const d = await r.json();
         await sendTelegramMessage(botToken, chatId, d.choices?.[0]?.message?.content ?? "Ниша не найдена.");
+      } else {
+        // Один Claude-запрос — весь контекст (WB + OZ если есть)
+        const marketNames = [hasWb ? "WB" : "", hasOz ? "Ozon" : ""].filter(Boolean).join(" и ");
+        await sendTelegramMessage(botToken, chatId, `📊 Смотрю нишу *${novaSubjectName}* (${marketNames}) — отчёт ниже 👇`);
+
+        async function claudeReq(ctx: string): Promise<string> {
+          const r = await fetch(`${process.env.ANTHROPIC_BASE_URL}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "claude-sonnet-4.6", max_tokens: 4000,
+              messages: [
+                { role: "system", content: agent!.systemPrompt + ctx },
+                { role: "user", content: finalQuery },
+              ],
+            }),
+          });
+          const d = await r.json();
+          return d.choices?.[0]?.message?.content ?? "";
+        }
+
+        // Генерируем markdown для каждого маркета отдельно, но шлём ОДИН файл
+        const wbMarkdown = hasWb
+          ? await claudeReq("\n\n" + formatMpstatsForTelegram({ ...wbNicheData!, market: "wb" }, wbNicheName))
+          : "";
+        const ozMarkdown = hasOz
+          ? await claudeReq("\n\n" + formatMpstatsForTelegram({ ...ozNicheData!, market: "oz" }, ozNicheName))
+          : "";
+
+        const reportName = novaSubjectName;
+        const html = generateNovaHtmlReport(reportName, wbMarkdown, ozMarkdown, novaWbTrends, novaOzTrends);
+        await sendNovaHtmlReport(botToken, chatId, html, reportName);
       }
 
     } else {
