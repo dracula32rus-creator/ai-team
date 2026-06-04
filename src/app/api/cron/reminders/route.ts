@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-async function sendMessage(token: string, chatId: number, text: string) {
+async function sendMessage(token: string, chatId: number | string, text: string) {
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -14,23 +14,59 @@ async function sendMessage(token: string, chatId: number, text: string) {
   });
 }
 
+// Зарплатный календарь
+const SALARY_SCHEDULE: Record<number, { name: string; amount: number }[]> = {
+  1: [
+    { name: "Вадим", amount: 32550 },
+    { name: "Надя",  amount: 50000 },
+    { name: "Рита",  amount: 32500 },
+  ],
+  5: [
+    { name: "Кирилл", amount: 50000 },
+  ],
+  15: [
+    { name: "Вадим", amount: 25000 },
+    { name: "Надя",  amount: 50000 },
+    { name: "Рита",  amount: 32500 },
+  ],
+  25: [
+    { name: "Кирилл", amount: 50000 },
+  ],
+};
+
+const SALARY_RECIPIENT = "@EviiilZues"; // личный чат
+
 export async function GET() {
   try {
-    const today = new Date().toISOString().split("T")[0];
+    const token = process.env.TELEGRAM_TOKEN_KIRA!;
+    const today = new Date();
+    const todayStr = today.toISOString().split("T")[0];
     const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+    const dayOfMonth = today.getDate();
 
-    // Только завтрашние дедлайны для напоминания
+    // ── Зарплатные напоминания ────────────────────────────────────────────────
+    const salaryToday = SALARY_SCHEDULE[dayOfMonth];
+    if (salaryToday?.length) {
+      const total = salaryToday.reduce((sum, s) => sum + s.amount, 0);
+      let msg = `💰 *Сегодня день зарплаты!*\n\n`;
+      for (const s of salaryToday) {
+        msg += `👤 *${s.name}* — ${s.amount.toLocaleString("ru-RU")} ₽\n`;
+      }
+      msg += `\n💳 *Итого к выплате: ${total.toLocaleString("ru-RU")} ₽*`;
+      await sendMessage(token, SALARY_RECIPIENT, msg);
+    }
+
+    // ── Задачи — дедлайны и просрочки ────────────────────────────────────────
     const { data: dueTomorrow } = await supabase
       .from("tasks")
       .select("*")
       .eq("deadline", tomorrow)
       .neq("status", "выполнена");
 
-    // Просроченные — обновляем статус
     const { data: overdue } = await supabase
       .from("tasks")
       .select("*")
-      .lt("deadline", today)
+      .lt("deadline", todayStr)
       .neq("status", "выполнена")
       .neq("status", "просрочена");
 
@@ -42,7 +78,6 @@ export async function GET() {
       }
     }
 
-    const token = process.env.TELEGRAM_TOKEN_KIRA!;
     const chatGroups: Record<number, { tomorrow: typeof dueTomorrow; overdue: typeof overdue }> = {};
 
     for (const task of (dueTomorrow ?? [])) {
