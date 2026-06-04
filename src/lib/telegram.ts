@@ -263,11 +263,11 @@ function buildInteractiveTrendChart(
   console.log(`=== TREND [${market}] total points:`, trends.length);
 
   const points = trends.map(t => ({
-    label:       String(t.label_date ?? t.date ?? t.period ?? ""),
-    revenue:     Number(t.revenue      ?? t.orders_revenue  ?? t.orders_sum    ?? 0),
-    orders:      Number(t.orders_count ?? t.orders          ?? t.purchases     ?? t.items_count ?? 0),
-    buyouts:     Number(t.buyouts_count ?? t.buyouts        ?? t.buyout_count  ?? 0),
-    buyouts_sum: Number(t.buyouts_revenue ?? t.buyouts_sum  ?? t.buyout_revenue ?? t.revenue_buyouts ?? 0),
+    label:       String(t.label_date ?? t.date ?? ""),
+    revenue:     Number(t.revenue      ?? 0),
+    orders:      Number(t.sales        ?? t.orders_count ?? t.orders ?? 0),
+    buyouts:     Number(t.buyouts_count ?? t.buyouts     ?? 0),
+    buyouts_sum: Number(t.buyouts_revenue ?? t.buyouts_sum ?? t.product_revenue ?? 0),
   }));
 
   const dataJson = JSON.stringify(points);

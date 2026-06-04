@@ -76,18 +76,28 @@ export async function searchWbSubjects(keyword: string) {
 export async function searchOzNiches(keyword: string) {
   console.log("=== MPStats OZ search via niche/list full scan:", keyword);
 
-  const res = await fetch(`${OZ_BASE}/niche/list`, {
-    method: "POST",
-    headers: getHeaders(),
-    body: JSON.stringify({ startRow: 0, endRow: 5000 }),
-  });
-  const text = await res.text();
-  console.log("OZ niche/list full scan status:", res.status, text.slice(0, 100));
-  if (!res.ok) return [];
+  // Качаем батчами по 500 (MPStats лимит)
+  const all: Record<string, unknown>[] = [];
+  const batchSize = 500;
+  for (let startRow = 0; startRow < 5000; startRow += batchSize) {
+    const res = await fetch(`${OZ_BASE}/niche/list`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({ startRow, endRow: startRow + batchSize }),
+    });
+    const text = await res.text();
+    console.log(`OZ niche/list batch ${startRow}-${startRow + batchSize} status:`, res.status);
+    if (!res.ok) break;
+    try {
+      const data = JSON.parse(text);
+      const batch = (data?.data ?? []) as Record<string, unknown>[];
+      all.push(...batch);
+      if (batch.length < batchSize) break; // последняя страница
+    } catch { break; }
+  }
+  console.log("OZ total niches loaded:", all.length);
 
   try {
-    const data = JSON.parse(text);
-    const all = (data?.data ?? []) as Record<string, unknown>[];
 
     const keywordLower = keyword.toLowerCase();
     const keywords = keywordLower.split(/\s+/).filter(w => w.length > 2);
