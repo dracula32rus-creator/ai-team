@@ -8,7 +8,6 @@ export async function POST(req: NextRequest) {
   const update = await req.json();
   const messageId = update?.message?.message_id;
 
-  // Дедупликация через Supabase — работает между serverless инстансами
   if (messageId) {
     try {
       const supabase = createClient(
@@ -16,27 +15,34 @@ export async function POST(req: NextRequest) {
         process.env.SUPABASE_ANON_KEY!
       );
       const key = `nova_msg_${messageId}`;
-      const { data } = await supabase
+
+      // Используем отдельную таблицу dedup или upsert в tasks с минимальными полями
+      const { data, error } = await supabase
         .from("tasks")
         .select("id")
         .eq("title", key)
-        .single();
+        .maybeSingle();
 
       if (data) {
-        console.log("Nova: duplicate message_id", messageId, "skipped");
+        console.log("Nova: duplicate", messageId, "skipped");
         return NextResponse.json({ ok: true });
       }
 
-      // Записываем что начали обработку
+      // insert с только обязательными полями
       await supabase.from("tasks").insert({
         title: key,
-        status: "processing",
-        assignee: "nova-dedup",
-        deadline: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        assignee: "dedup",
+        assignee_username: "dedup",
+        controller: "dedup",
+        controller_username: "dedup",
+        status: "done",
+        chat_id: 0,
+        message_id: messageId,
+        task_index: 0,
+        archived: false,
       });
     } catch (e) {
       console.error("Dedup error:", e);
-      // Если Supabase недоступен — всё равно продолжаем
     }
   }
 

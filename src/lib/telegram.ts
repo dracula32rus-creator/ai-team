@@ -284,9 +284,9 @@ function buildTrendSvg(trends: Record<string, unknown>[]): string {
 (function(){
   var D=${dataJson};
   var CID="${cid}";
-  var MC={revenue:"#ff6b3d",orders:"#4A9EE0",buyouts:"#FF9800",buyouts_sum:"#C77DFF"};
-  var ML={revenue:"Сумма заказов",orders:"Кол-во заказов",buyouts:"Кол-во выкупов",buyouts_sum:"Сумма выкупов"};
-  var MS={revenue:{w:2.5,d:[]},orders:{w:2,d:[6,3]},buyouts:{w:2,d:[2,3]},buyouts_sum:{w:1.5,d:[8,3,2,3]}};
+  var MC={revenue:"#ff6b3d",orders:"#4A9EE0",buyouts:"#FF9800",buyouts_sum:"#C77DFF",product_revenue:"#17BF50"};
+  var ML={revenue:"Сумма заказов",orders:"Кол-во заказов",buyouts:"Кол-во выкупов",buyouts_sum:"Сумма выкупов",product_revenue:"Выручка товаров"};
+  var MS={revenue:{w:2.5,d:[]},orders:{w:2,d:[6,3]},buyouts:{w:2,d:[2,3]},buyouts_sum:{w:1.5,d:[8,3,2,3]},product_revenue:{w:2,d:[4,2]}};
   var active={revenue:true};
   var cv=document.getElementById(CID+"c");
   var tt=document.getElementById(CID+"tt");
