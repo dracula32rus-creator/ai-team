@@ -14,7 +14,6 @@ async function sendMessage(token: string, chatId: number | string, text: string)
   });
 }
 
-// Зарплатный календарь
 const SALARY_SCHEDULE: Record<number, { name: string; amount: number }[]> = {
   1: [
     { name: "Вадим", amount: 32550 },
@@ -34,29 +33,44 @@ const SALARY_SCHEDULE: Record<number, { name: string; amount: number }[]> = {
   ],
 };
 
-const SALARY_RECIPIENT = "@EviiilZues"; // личный чат
+const SALARY_RECIPIENT = "@EviiilZues";
 
-export async function GET() {
+async function sendSalaryReminder(token: string, day: number) {
+  const salaries = SALARY_SCHEDULE[day];
+  if (!salaries?.length) return;
+  const total = salaries.reduce((sum, s) => sum + s.amount, 0);
+  let msg = `💰 *Сегодня день зарплаты!* (${day} число)\n\n`;
+  for (const s of salaries) {
+    msg += `👤 *${s.name}* — ${s.amount.toLocaleString("ru-RU")} ₽\n`;
+  }
+  msg += `\n💳 *Итого к выплате: ${total.toLocaleString("ru-RU")} ₽*`;
+  await sendMessage(token, SALARY_RECIPIENT, msg);
+}
+
+export async function GET(req: Request) {
   try {
     const token = process.env.TELEGRAM_TOKEN_KIRA!;
+    const { searchParams } = new URL(req.url);
+    const testMode = searchParams.get("test") === "1";
+
+    if (testMode) {
+      // Тестируем все 4 даты подряд
+      for (const day of [1, 5, 15, 25]) {
+        await sendSalaryReminder(token, day);
+        await new Promise(r => setTimeout(r, 500));
+      }
+      return NextResponse.json({ ok: true, mode: "test", sent: [1, 5, 15, 25] });
+    }
+
+    // Обычный режим — только сегодняшняя дата
     const today = new Date();
     const todayStr = today.toISOString().split("T")[0];
     const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
     const dayOfMonth = today.getDate();
 
-    // ── Зарплатные напоминания ────────────────────────────────────────────────
-    const salaryToday = SALARY_SCHEDULE[dayOfMonth];
-    if (salaryToday?.length) {
-      const total = salaryToday.reduce((sum, s) => sum + s.amount, 0);
-      let msg = `💰 *Сегодня день зарплаты!*\n\n`;
-      for (const s of salaryToday) {
-        msg += `👤 *${s.name}* — ${s.amount.toLocaleString("ru-RU")} ₽\n`;
-      }
-      msg += `\n💳 *Итого к выплате: ${total.toLocaleString("ru-RU")} ₽*`;
-      await sendMessage(token, SALARY_RECIPIENT, msg);
-    }
+    await sendSalaryReminder(token, dayOfMonth);
 
-    // ── Задачи — дедлайны и просрочки ────────────────────────────────────────
+    // Задачи
     const { data: dueTomorrow } = await supabase
       .from("tasks")
       .select("*")
@@ -85,7 +99,6 @@ export async function GET() {
       if (!chatGroups[task.chat_id]) chatGroups[task.chat_id] = { tomorrow: [], overdue: [] };
       chatGroups[task.chat_id].tomorrow!.push(task);
     }
-
     for (const task of (overdue ?? [])) {
       if (!task.chat_id) continue;
       if (!chatGroups[task.chat_id]) chatGroups[task.chat_id] = { tomorrow: [], overdue: [] };
@@ -94,22 +107,19 @@ export async function GET() {
 
     for (const [chatId, data] of Object.entries(chatGroups)) {
       let msg = "☀️ *Доброе утро! Сводка по задачам:*\n\n";
-
       if (data.overdue?.length) {
         msg += "🔴 *Просрочено:*\n";
         for (const t of data.overdue) msg += `• #${t.id} ${t.title} — *${t.assignee}*\n`;
         msg += "\n";
       }
-
       if (data.tomorrow?.length) {
         msg += "⚠️ *Завтра дедлайн:*\n";
         for (const t of data.tomorrow) msg += `• #${t.id} ${t.title} — *${t.assignee}*\n`;
       }
-
       await sendMessage(token, Number(chatId), msg);
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, mode: "production", day: dayOfMonth });
   } catch (error) {
     console.error("Reminders error:", error);
     return NextResponse.json({ error: "Failed" }, { status: 500 });
