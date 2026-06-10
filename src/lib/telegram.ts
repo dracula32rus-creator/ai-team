@@ -5,6 +5,7 @@ import {
   getWbNicheData,
   getOzNicheData,
   detectMarket,
+  type NicheDataMultiPeriod,
 } from "@/lib/mpstats";
 
 interface TelegramPhoto {
@@ -185,23 +186,20 @@ async function extractSearchKeyword(text: string): Promise<string> {
   }
 }
 
-function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: string): string {
-  const sellers = (data.sellers ?? []) as Record<string, unknown>[];
-  const brands = (data.brands ?? []) as Record<string, unknown>[];
-  const priceSegments = (data.priceSegments ?? []) as Record<string, unknown>[];
+function formatMpstatsForTelegram(data: NicheDataMultiPeriod, subjectName: string): string {
+  const sellers = (data.period1m?.sellers ?? []) as Record<string, unknown>[];
+  const brands = (data.period1m?.brands ?? []) as Record<string, unknown>[];
+  const priceSegments = (data.period1m?.priceSegments ?? []) as Record<string, unknown>[];
   const trends = (data.trends ?? []) as Record<string, unknown>[];
   const market = data.market as string;
   const marketLabel = market === "wb" ? "Wildberries" : "Ozon";
-
-  const now = new Date();
-  const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
-  const d2 = yesterday.toISOString().split("T")[0];
-  const d1 = new Date(now.getTime() - 31 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const d1 = data.period1m?.period?.d1 ?? "";
+  const d2 = data.period1m?.period?.d2 ?? "";
 
   let ctx = `[LIVE MPSTATS DATA — ${marketLabel} — Ниша: "${subjectName}" за период ${d1} — ${d2}]\n\n`;
 
   if (sellers?.length) {
-    ctx += `ТОП-5 ПРОДАВЦОВ (${marketLabel}):\n`;
+    ctx += `ТОП-10 ПРОДАВЦОВ (${marketLabel}):\n`;
     const totalRev = sellers.reduce((sum, s) => sum + Number(s.revenue ?? 0), 0);
     sellers.slice(0, 10).forEach((s, i) => {
       const revenue = Number(s.revenue ?? 0);
@@ -218,15 +216,13 @@ function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: st
       ctx += "\n\n";
     }
   }
-
   if (brands?.length) {
-    ctx += `ТОП-5 БРЕНДОВ (${marketLabel}):\n`;
+    ctx += `ТОП-10 БРЕНДОВ (${marketLabel}):\n`;
     brands.slice(0, 10).forEach((b, i) => {
       ctx += `${i + 1}. ${b.name} — ${b.revenue ? Number(b.revenue).toLocaleString("ru-RU") : "—"} ₽\n`;
     });
     ctx += "\n";
   }
-
   if (priceSegments?.length) {
     ctx += `ЦЕНОВАЯ СЕГМЕНТАЦИЯ (${marketLabel}):\n`;
     priceSegments.forEach((seg) => {
@@ -236,7 +232,6 @@ function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: st
     });
     ctx += "\n";
   }
-
   if (trends?.length) {
     const last = trends[trends.length - 1] as Record<string, unknown>;
     const first = trends[0] as Record<string, unknown>;
@@ -245,10 +240,10 @@ function formatMpstatsForTelegram(data: Record<string, unknown>, subjectName: st
     const pct = r1 > 0 ? (((r2 - r1) / r1) * 100).toFixed(1) : "—";
     ctx += `ТРЕНД (${trends.length} мес): ${Number(pct) > 0 ? "↑ Растущая" : "↓ Падающая"} ниша (${pct}%)\n\n`;
   }
-
   ctx += `Используй эти РЕАЛЬНЫЕ данные из MPStats. Сделай структурированный отчёт с таблицами. Дай итоговую оценку — заходить или нет, лучший ценовой сегмент.`;
   return ctx;
 }
+
 
 function buildTrendSvg(trends: Record<string, unknown>[]): string {
   if (trends.length < 2) return "";
@@ -411,7 +406,95 @@ function buildTrendSvg(trends: Record<string, unknown>[]): string {
 }
 
 
-function generateNovaHtmlReport(markdown: string, nicheName: string, trendsWb?: Record<string, unknown>[], trendsOz?: Record<string, unknown>[]): string {
+
+function buildPeriodSwitcher(
+  p1m: { sellers: Record<string, unknown>[]; brands: Record<string, unknown>[]; priceSegments: Record<string, unknown>[]; period: { d1: string; d2: string } },
+  p3m: { sellers: Record<string, unknown>[]; brands: Record<string, unknown>[]; priceSegments: Record<string, unknown>[]; period: { d1: string; d2: string } },
+  p12m: { sellers: Record<string, unknown>[]; brands: Record<string, unknown>[]; priceSegments: Record<string, unknown>[]; period: { d1: string; d2: string } }
+): string {
+  const fmt = (v: number) => v >= 1e9 ? (v/1e9).toFixed(1)+"млрд ₽" : v >= 1e6 ? (v/1e6).toFixed(1)+"млн ₽" : v >= 1e3 ? (v/1e3).toFixed(0)+"тыс ₽" : v.toLocaleString("ru-RU")+" ₽";
+
+  function renderSellersTable(sellers: Record<string, unknown>[]): string {
+    if (!sellers?.length) return "<p style=\"color:#666\">Нет данных</p>";
+    const total = sellers.reduce((s, r) => s + Number(r.revenue ?? 0), 0);
+    const rows = sellers.slice(0, 10).map((s, i) => {
+      const rev = Number(s.revenue ?? 0);
+      const share = total > 0 ? ((rev/total)*100).toFixed(1) : "—";
+      return `<tr><td>${i+1}</td><td>${s.name}</td><td>${fmt(rev)}</td><td>${s.revenue_share ?? share}%</td></tr>`;
+    }).join("");
+    return `<table><thead><tr><th>#</th><th>Продавец</th><th>Выручка</th><th>Доля</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  function renderBrandsTable(brands: Record<string, unknown>[]): string {
+    if (!brands?.length) return "<p style=\"color:#666\">Нет данных</p>";
+    const rows = brands.slice(0, 10).map((b, i) =>
+      `<tr><td>${i+1}</td><td>${b.name}</td><td>${b.revenue ? fmt(Number(b.revenue)) : "—"}</td></tr>`
+    ).join("");
+    return `<table><thead><tr><th>#</th><th>Бренд</th><th>Выручка</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  function renderPriceTable(segs: Record<string, unknown>[]): string {
+    if (!segs?.length) return "<p style=\"color:#666\">Нет данных</p>";
+    const rows = segs.map(s => {
+      const from = s.price_from ?? s.min_range_price ?? "?";
+      const to = s.price_to ?? s.max_range_price ?? "?";
+      const rev = s.revenue ? fmt(Number(s.revenue)) : "—";
+      return `<tr><td>${from}–${to} ₽</td><td>${rev}</td></tr>`;
+    }).join("");
+    return `<table><thead><tr><th>Диапазон</th><th>Выручка</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  const periods = [
+    { key: "1m", label: "1 месяц", data: p1m },
+    { key: "3m", label: "3 месяца", data: p3m },
+    { key: "12m", label: "12 месяцев", data: p12m },
+  ];
+
+  const tabs = periods.map((p, i) =>
+    `<button onclick="switchPeriod('${p.key}')" id="ptab-${p.key}" style="border:1.5px solid ${i===0?"#ff6b3d":"#333"};background:${i===0?"#ff6b3d22":"#222"};color:${i===0?"#ff6b3d":"#666"};border-radius:7px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;">${p.label}</button>`
+  ).join("");
+
+  const panels = periods.map((p, i) => `
+    <div id="ppanel-${p.key}" style="display:${i===0?"block":"none"}">
+      <div style="margin-bottom:18px;">
+        <h3 style="font-size:14px;color:#ff6b3d;margin-bottom:10px;">🏆 Топ-10 продавцов <span style="font-size:11px;color:#555;">(${p.data.period.d1} — ${p.data.period.d2})</span></h3>
+        ${renderSellersTable(p.data.sellers)}
+      </div>
+      <div style="margin-bottom:18px;">
+        <h3 style="font-size:14px;color:#ff6b3d;margin-bottom:10px;">🥇 Топ-10 брендов</h3>
+        ${renderBrandsTable(p.data.brands)}
+      </div>
+      <div>
+        <h3 style="font-size:14px;color:#ff6b3d;margin-bottom:10px;">💰 Ценовая сегментация</h3>
+        ${renderPriceTable(p.data.priceSegments)}
+      </div>
+    </div>
+  `).join("");
+
+  return `
+<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:22px;margin-bottom:14px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px;">
+    <div style="font-size:16px;font-weight:700;color:#e8e8e8;">📊 Данные по периодам</div>
+    <div style="display:flex;gap:6px;">${tabs}</div>
+  </div>
+  ${panels}
+</div>
+<script>
+function switchPeriod(key) {
+  ['1m','3m','12m'].forEach(function(k) {
+    var panel = document.getElementById('ppanel-'+k);
+    var tab = document.getElementById('ptab-'+k);
+    if (panel) panel.style.display = k===key ? 'block' : 'none';
+    if (tab) {
+      if (k===key) { tab.style.borderColor='#ff6b3d'; tab.style.background='#ff6b3d22'; tab.style.color='#ff6b3d'; }
+      else { tab.style.borderColor='#333'; tab.style.background='#222'; tab.style.color='#666'; }
+    }
+  });
+}
+</script>`;
+}
+
+function generateNovaHtmlReport(markdown: string, nicheName: string, nicheData?: NicheDataMultiPeriod, trendsWb?: Record<string, unknown>[], trendsOz?: Record<string, unknown>[]): string {
   const now = new Date();
   const dateStr = now.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
   const wbChart = trendsWb && trendsWb.length >= 2 ? buildTrendSvg(trendsWb) : "";
@@ -420,6 +503,12 @@ function generateNovaHtmlReport(markdown: string, nicheName: string, trendsWb?: 
     wbChart ? `<div class="trend-card"><h2>📈 Тренд выручки WB</h2><div class="svg-wrap">${wbChart}</div></div>` : "",
     ozChart ? `<div class="trend-card"><h2>📈 Тренд выручки Ozon</h2><div class="svg-wrap">${ozChart}</div></div>` : "",
   ].join("");
+
+  // Данные по периодам для переключателя
+  const p1m = nicheData?.period1m;
+  const p3m = nicheData?.period3m;
+  const p12m = nicheData?.period12m;
+  const periodSwitcher = p1m && p3m && p12m ? buildPeriodSwitcher(p1m, p3m, p12m) : "";
 
   return `<!DOCTYPE html>
 <html lang="ru">
@@ -466,6 +555,7 @@ function generateNovaHtmlReport(markdown: string, nicheName: string, trendsWb?: 
   <div class="meta">Анализ ниши MPStats · ${dateStr}</div>
 </div>
 ${chartsHtml}
+${periodSwitcher}
 <div id="content">${convertMarkdownToHtml(markdown)}</div>
 <div class="footer">Powered by MPStats · AI Team WB/Ozon · ${dateStr}</div>
 </body>
@@ -587,6 +677,8 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
     let novaSubjectName = "";
     let novaWbTrends: Record<string, unknown>[] = [];
     let novaOzTrends: Record<string, unknown>[] = [];
+    let wbNicheDataRef: NicheDataMultiPeriod | undefined;
+    let ozNicheDataRef: NicheDataMultiPeriod | undefined;
 
     if (agentId === "cfo-finn" && needsOzonReport(finalQuery)) {
       try {
@@ -624,10 +716,10 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
         if (subjects.length > 0) {
           novaSubjectName = queryToUse;
           const first = subjects[0];
-          const nicheData = first.market === "wb" ? await getWbNicheData(Number(first.id)) : await getOzNicheData(Number(first.id));
-          if (first.market === "wb") novaWbTrends = nicheData.trends as Record<string, unknown>[];
-          else novaOzTrends = nicheData.trends as Record<string, unknown>[];
-          extraContext = "\n\n" + formatMpstatsForTelegram({ ...nicheData, market: first.market }, String(first.name));
+          const nicheData: NicheDataMultiPeriod = first.market === "wb" ? await getWbNicheData(Number(first.id)) : await getOzNicheData(Number(first.id));
+          if (first.market === "wb") { novaWbTrends = nicheData.trends as Record<string, unknown>[]; wbNicheDataRef = nicheData; }
+          else { novaOzTrends = nicheData.trends as Record<string, unknown>[]; ozNicheDataRef = nicheData; }
+          extraContext = "\n\n" + formatMpstatsForTelegram(nicheData, String(first.name));
           if (market === "both" && subjects.length > 1) {
             const second = subjects.find(s => s.market !== first.market);
             if (second) {
@@ -676,7 +768,7 @@ export async function handleTelegramMessage(update: TelegramUpdate, agentId: str
     if (agentId === "buyer-nova" && novaSubjectName) {
       const shortMsg = `📊 Анализ ниши *${novaSubjectName}* готов — смотри файл ниже 👇`;
       await sendTelegramMessage(botToken, chatId, shortMsg);
-      const html = generateNovaHtmlReport(response, novaSubjectName, novaWbTrends, novaOzTrends);
+      const html = generateNovaHtmlReport(response, novaSubjectName, wbNicheDataRef ?? ozNicheDataRef, novaWbTrends, novaOzTrends);
       await sendNovaHtmlReport(botToken, chatId, html, novaSubjectName);
     } else {
       await sendTelegramMessage(botToken, chatId, response);

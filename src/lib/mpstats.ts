@@ -8,7 +8,8 @@ function getHeaders() {
   };
 }
 
-function getDates() {
+// 1 месяц
+function getDates1m() {
   const now = new Date();
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
@@ -17,13 +18,34 @@ function getDates() {
   return { d1, d2 };
 }
 
+// 3 месяца
+function getDates3m() {
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const d2 = yesterday.toISOString().split("T")[0];
+  const d1 = new Date(now.getTime() - 92 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  return { d1, d2 };
+}
+
+// 12 месяцев
+function getDates12m() {
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const d2 = yesterday.toISOString().split("T")[0];
+  const d1 = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  return { d1, d2 };
+}
+
+// 4 года для тренда
 function getYearDates() {
   const now = new Date();
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   const d2 = yesterday.toISOString().split("T")[0];
   const yearAgo = new Date(now);
-  yearAgo.setFullYear(yearAgo.getFullYear() - 4); // ← было -1, теперь 4 года
+  yearAgo.setFullYear(yearAgo.getFullYear() - 4);
   yearAgo.setDate(1);
   const d1 = yearAgo.toISOString().split("T")[0];
   return { d1, d2 };
@@ -38,31 +60,18 @@ export function detectMarket(query: string): "wb" | "oz" | "both" {
 
 export async function searchWbSubjects(keyword: string) {
   console.log("=== MPStats WB search via items:", keyword);
-
   const itemsRes = await fetch(`${WB_BASE}/items?keyword=${encodeURIComponent(keyword)}&startRow=0&endRow=5`, {
-    method: "POST",
-    headers: getHeaders(),
-    body: JSON.stringify({}),
+    method: "POST", headers: getHeaders(), body: JSON.stringify({}),
   });
   const itemsText = await itemsRes.text();
   console.log("WB items status:", itemsRes.status, itemsText.slice(0, 200));
   if (!itemsRes.ok) return [];
-
   let firstItemId: number | null = null;
-  try {
-    const itemsData = JSON.parse(itemsText);
-    firstItemId = itemsData?.data?.[0]?.id ?? null;
-  } catch { return []; }
-
+  try { const d = JSON.parse(itemsText); firstItemId = d?.data?.[0]?.id ?? null; } catch { return []; }
   if (!firstItemId) return [];
-
-  const itemRes = await fetch(`${WB_BASE}/items/${firstItemId}/full`, {
-    headers: getHeaders(),
-  });
+  const itemRes = await fetch(`${WB_BASE}/items/${firstItemId}/full`, { headers: getHeaders() });
   const itemText = await itemRes.text();
-  console.log("WB item full status:", itemRes.status);
   if (!itemRes.ok) return [];
-
   try {
     const item = JSON.parse(itemText);
     const subjectId = item?.subject?.id;
@@ -75,18 +84,14 @@ export async function searchWbSubjects(keyword: string) {
 
 export async function searchOzNiches(keyword: string) {
   console.log("=== MPStats OZ search via niche/list:", keyword);
-
-  // Качаем батчами по 500, останавливаемся как только нашли совпадение
   const batchSize = 500;
   let bestMatch: Record<string, unknown> | null = null;
   let bestScore = 0;
   const keywordLower = keyword.toLowerCase();
   const keywords = keywordLower.split(/\s+/).filter(w => w.length > 2);
-
   for (let startRow = 0; startRow < 5000; startRow += batchSize) {
     const res = await fetch(`${OZ_BASE}/niche/list`, {
-      method: "POST",
-      headers: getHeaders(),
+      method: "POST", headers: getHeaders(),
       body: JSON.stringify({ startRow, endRow: startRow + batchSize }),
     });
     const text = await res.text();
@@ -102,104 +107,131 @@ export async function searchOzNiches(keyword: string) {
         else if (name.includes(keywordLower)) score += 50;
         else if (keywordLower.includes(name)) score += 30;
         for (const kw of keywords) { if (name.includes(kw)) score += 10; }
-        // Бонус за высокий уровень категории (меньше вложенности = лучше)
-        if (score > 0) {
-          const depth = (name.match(/\//g) || []).length;
-          score += Math.max(0, 4 - depth) * 5;
-        }
+        if (score > 0) { const depth = (name.match(/\//g) || []).length; score += Math.max(0, 4 - depth) * 5; }
         if (score > bestScore) { bestScore = score; bestMatch = s; }
       }
-      // Нашли хорошее совпадение — стоп
-      if (bestScore >= 50) {
-        console.log("OZ found match at batch", startRow, ":", bestMatch?.category, "(", bestScore, ")");
-        break;
-      }
+      if (bestScore >= 50) { console.log("OZ found match at batch", startRow, ":", bestMatch?.category, "(", bestScore, ")"); break; }
       if (batch.length < batchSize) break;
     } catch { break; }
   }
-
-  if (!bestMatch || bestScore === 0) {
-    console.log("OZ no match for:", keyword);
-    return [];
-  }
+  if (!bestMatch || bestScore === 0) { console.log("OZ no match for:", keyword); return []; }
   const fullName = String(bestMatch.category ?? "");
-  // Берём последний сегмент пути "Туризм / ... / Термосы" → "Термосы"
   const shortName = fullName.split("/").pop()?.trim() || fullName;
-  console.log("OZ best match:", fullName, "→ short:", shortName, "score:", bestScore);
+  console.log("OZ best match:", fullName, "→ short:", shortName);
   return [{ id: bestMatch.id, name: shortName, market: "oz" }];
 }
 
-
-export async function getWbNicheData(subjectId: number) {
-  const { d1, d2 } = getDates();
-  const { d1: d1year, d2: d2year } = getYearDates();
-  const h = getHeaders();
+// Вспомогательная функция для загрузки данных за конкретный период
+async function fetchWbPeriodData(subjectId: number, d1: string, d2: string, h: Record<string, string>) {
   const base = `${WB_BASE}/subject`;
   const q = `path=${subjectId}&d1=${d1}&d2=${d2}`;
-  const qTrend = `path=${subjectId}&d1=${d1year}&d2=${d2year}&trends_by=month`;
-
-  console.log("=== WB niche data for id:", subjectId, "period:", d1, d2);
-
-  const [infoRes, sellersRes, brandsRes, priceRes, trendsRes] = await Promise.all([
-    fetch(`${base}/${subjectId}`, { headers: h }),
+  const [sellersRes, brandsRes, priceRes] = await Promise.all([
     fetch(`${base}/sellers?${q}&startRow=0&endRow=10`, { method: "POST", headers: h, body: JSON.stringify({}) }),
     fetch(`${base}/brands?${q}&startRow=0&endRow=10`, { method: "POST", headers: h, body: JSON.stringify({}) }),
     fetch(`${base}/price_segmentation?${q}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
-    fetch(`${base}/trends?${qTrend}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
   ]);
-
-  const results = await Promise.all([
-    infoRes.text(), sellersRes.text(), brandsRes.text(),
-    priceRes.text(), trendsRes.text(),
+  const [sellersText, brandsText, priceText] = await Promise.all([
+    sellersRes.text(), brandsRes.text(), priceRes.text(),
   ]);
-
-  console.log("WB sellers status:", sellersRes.status, results[1].slice(0, 150));
-  console.log("WB price status:", priceRes.status, results[3].slice(0, 150));
-  console.log("WB trends status:", trendsRes.status, results[4].slice(0, 150));
-
   const parse = (text: string) => { try { return JSON.parse(text); } catch { return {}; } };
-  const [info, sellers, brands, price, trends] = results.map(parse);
-
+  const [sellers, brands, price] = [sellersText, brandsText, priceText].map(parse);
   return {
-    market: "wb",
-    info,
     sellers: sellers?.data ?? sellers ?? [],
     brands: brands?.data ?? brands ?? [],
     priceSegments: price?.data ?? price ?? [],
-    trends: Array.isArray(trends) ? trends : (trends?.data ?? []),
+    period: { d1, d2 },
   };
 }
 
-export async function getOzNicheData(nicheId: number) {
-  const { d1, d2 } = getDates();
-  const { d1: d1year, d2: d2year } = getYearDates();
-  const h = getHeaders();
+async function fetchOzPeriodData(nicheId: number, d1: string, d2: string, h: Record<string, string>) {
   const base = `${OZ_BASE}/niche`;
   const q = `path=${nicheId}&d1=${d1}&d2=${d2}`;
-  const qTrend = `path=${nicheId}&d1=${d1year}&d2=${d2year}&trends_by=month`;
-
-  const [infoRes, sellersRes, brandsRes, priceRes, trendsRes] = await Promise.all([
-    fetch(`${base}/${nicheId}`, { headers: h }),
+  const [sellersRes, brandsRes, priceRes] = await Promise.all([
     fetch(`${base}/sellers?${q}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
     fetch(`${base}/brands?${q}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
     fetch(`${base}/price_segmentation?${q}&segmentsCnt=8`, { method: "POST", headers: h, body: JSON.stringify({}) }),
-    fetch(`${base}/trends?${qTrend}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
   ]);
-
-  const results = await Promise.all([
-    infoRes.text(), sellersRes.text(), brandsRes.text(),
-    priceRes.text(), trendsRes.text(),
+  const [sellersText, brandsText, priceText] = await Promise.all([
+    sellersRes.text(), brandsRes.text(), priceRes.text(),
   ]);
-
   const parse = (text: string) => { try { return JSON.parse(text); } catch { return {}; } };
-  const [info, sellers, brands, price, trends] = results.map(parse);
-
+  const [sellers, brands, price] = [sellersText, brandsText, priceText].map(parse);
   return {
-    market: "oz",
-    info,
     sellers: sellers?.data ?? sellers ?? [],
     brands: brands?.data ?? brands ?? [],
     priceSegments: price?.data ?? price ?? [],
-    trends: Array.isArray(trends) ? trends : (trends?.data ?? []),
+    period: { d1, d2 },
   };
+}
+
+export type PeriodData = {
+  sellers: Record<string, unknown>[];
+  brands: Record<string, unknown>[];
+  priceSegments: Record<string, unknown>[];
+  period: { d1: string; d2: string };
+};
+
+export type NicheDataMultiPeriod = {
+  market: string;
+  info: Record<string, unknown>;
+  trends: Record<string, unknown>[];
+  period1m: PeriodData;
+  period3m: PeriodData;
+  period12m: PeriodData;
+};
+
+export async function getWbNicheData(subjectId: number): Promise<NicheDataMultiPeriod> {
+  const { d1: d1year, d2: d2year } = getYearDates();
+  const dates1m = getDates1m();
+  const dates3m = getDates3m();
+  const dates12m = getDates12m();
+  const h = getHeaders();
+  const base = `${WB_BASE}/subject`;
+  const qTrend = `path=${subjectId}&d1=${d1year}&d2=${d2year}&trends_by=month`;
+
+  console.log("=== WB niche data for id:", subjectId, "loading 3 periods...");
+
+  const [infoRes, trendsRes, data1m, data3m, data12m] = await Promise.all([
+    fetch(`${base}/${subjectId}`, { headers: h }),
+    fetch(`${base}/trends?${qTrend}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+    fetchWbPeriodData(subjectId, dates1m.d1, dates1m.d2, h),
+    fetchWbPeriodData(subjectId, dates3m.d1, dates3m.d2, h),
+    fetchWbPeriodData(subjectId, dates12m.d1, dates12m.d2, h),
+  ]);
+
+  const [infoText, trendsText] = await Promise.all([infoRes.text(), trendsRes.text()]);
+  const parse = (text: string) => { try { return JSON.parse(text); } catch { return {}; } };
+  const info = parse(infoText);
+  const trendsRaw = parse(trendsText);
+  const trends = Array.isArray(trendsRaw) ? trendsRaw : (trendsRaw?.data ?? []);
+
+  console.log("WB trends status:", trendsRes.status, "points:", trends.length);
+
+  return { market: "wb", info, trends, period1m: data1m, period3m: data3m, period12m: data12m };
+}
+
+export async function getOzNicheData(nicheId: number): Promise<NicheDataMultiPeriod> {
+  const { d1: d1year, d2: d2year } = getYearDates();
+  const dates1m = getDates1m();
+  const dates3m = getDates3m();
+  const dates12m = getDates12m();
+  const h = getHeaders();
+  const base = `${OZ_BASE}/niche`;
+  const qTrend = `path=${nicheId}&d1=${d1year}&d2=${d2year}&trends_by=month`;
+
+  const [infoRes, trendsRes, data1m, data3m, data12m] = await Promise.all([
+    fetch(`${base}/${nicheId}`, { headers: h }),
+    fetch(`${base}/trends?${qTrend}`, { method: "POST", headers: h, body: JSON.stringify({}) }),
+    fetchOzPeriodData(nicheId, dates1m.d1, dates1m.d2, h),
+    fetchOzPeriodData(nicheId, dates3m.d1, dates3m.d2, h),
+    fetchOzPeriodData(nicheId, dates12m.d1, dates12m.d2, h),
+  ]);
+
+  const [infoText, trendsText] = await Promise.all([infoRes.text(), trendsRes.text()]);
+  const parse = (text: string) => { try { return JSON.parse(text); } catch { return {}; } };
+  const info = parse(infoText);
+  const trendsRaw = parse(trendsText);
+  const trends = Array.isArray(trendsRaw) ? trendsRaw : (trendsRaw?.data ?? []);
+
+  return { market: "oz", info, trends, period1m: data1m, period3m: data3m, period12m: data12m };
 }
